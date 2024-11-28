@@ -1,0 +1,35 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Robyn Admin{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-4">模型管理</h1>
+            
+            <!-- 添加调试信息 -->
+            {% if models %}
+                <div class="alert alert-info">
+                    已注册模型数量: {{ models|length }}
+                </div>
+            {% else %}
+                <div class="alert alert-warning">
+                    没有注册任何模型
+                </div>
+            {% endif %}
+            
+            <div class="list-group">
+                {% for model_name, model_admin in models.items() %}
+                <a href="/admin/{{ model_name }}" class="list-group-item list-group-item-action">
+                    <div class="d-flex w-100 justify-content-between">
+                        <h5 class="mb-1">{{ model_name }}</h5>
+                    </div>
+                    <p class="mb-1">管理 {{ model_name }} 数据</p>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

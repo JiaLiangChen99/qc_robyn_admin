@@ -1,0 +1,173 @@
+{% extends "admin/base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>{{ model_name }} 列表</h1>
+        <button class="btn btn-primary" onclick="showFormModal('add')">添加</button>
+    </div>
+
+    {% if search_fields %}
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="get" class="row g-3">
+                <div class="col-auto">
+                    <input type="text" class="form-control" name="search" placeholder="搜索..." value="{{ search_term or '' }}">
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-primary">搜索</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <div class="card-body">
+            <table class="table">
+                <thead>
+                    <tr>
+                        {% for field in fields %}
+                        <th>{{ field }}</th>
+                        {% endfor %}
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for obj in objects %}
+                    <tr>
+                        {% for field in fields %}
+                        <td>{{ obj[field] }}</td>
+                        {% endfor %}
+                        <td>
+                            <button data-object='{{ obj|tojson|safe }}'
+                                    onclick="showFormModal('edit', this.dataset.object)"
+                                    class="btn btn-sm btn-warning">编辑</button>
+                            <button onclick="deleteItem('{{ obj.id }}')" 
+                                    class="btn btn-sm btn-danger">删除</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 表单弹窗 -->
+<div class="modal fade" id="formModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle">添加/编辑 {{ model_name }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="dataForm">
+                    {% for field in form_fields %}
+                    {% if field not in readonly_fields %}
+                    <div class="mb-3">
+                        <label for="{{ field }}" class="form-label">{{ field }}</label>
+                        <input type="text" class="form-control" id="{{ field }}" name="{{ field }}">
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="submitForm()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% block extra_js %}
+<script>
+// 先声明全局变量
+var globalVars = {
+    currentAction: 'add',
+    currentId: null,
+    modal: null,
+    formFields: {{ fields|tojson|safe }},
+};
+
+// 等待文档加载完成
+document.addEventListener('DOMContentLoaded', function() {
+    // 初始化 Bootstrap Modal
+    const modalElement = document.getElementById('formModal');
+    globalVars.modal = new bootstrap.Modal(modalElement);
+});
+
+// 定义全局函数
+function showFormModal(action, dataStr) {
+    globalVars.currentAction = action;
+    const form = document.getElementById('dataForm');
+    const title = document.getElementById('modalTitle');
+    
+    // 重置表单
+    form.reset();
+    
+    if (action === 'edit' && dataStr) {
+        title.textContent = '编辑 {{ model_name }}';
+        // 解析数据对象
+        const data = typeof dataStr === 'string' ? JSON.parse(dataStr) : dataStr;
+        globalVars.currentId = data.id;
+        // 填充表单数据
+        for (const field of globalVars.formFields) {
+            if (data[field] && form.elements[field]) {
+                form.elements[field].value = data[field];
+            }
+        }
+    } else {
+        title.textContent = '添加 {{ model_name }}';
+        globalVars.currentId = null;
+    }
+    
+    globalVars.modal.show();
+}
+
+async function submitForm() {
+    const form = document.getElementById('dataForm');
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+    
+    try {
+        const url = globalVars.currentAction === 'add' 
+            ? `/admin/{{ model_name }}/add`
+            : `/admin/{{ model_name }}/${globalVars.currentId}/edit`;
+            
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams(data)
+        });
+        
+        if (response.ok) {
+            globalVars.modal.hide();
+            window.location.reload();
+        } else {
+            alert('操作失败，请重试');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('操作失败，请重试');
+    }
+}
+
+function deleteItem(id) {
+    if (confirm('确定要删除这条记录吗？')) {
+        fetch('/admin/{{ model_name }}/' + id + '/delete', {
+            method: 'POST'
+        }).then(response => {
+            if (response.ok) {
+                window.location.reload();
+            }
+        });
+    }
+}
+</script>
+{% endblock %}
+{% endblock %} 
