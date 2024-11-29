@@ -1,7 +1,7 @@
 import pathlib
 import os
 
-from models import register_tortoise
+from models import register_tortoise, init_test_data
 
 from robyn import Robyn, Request, Response
 from robyn.templating import JinjaTemplate
@@ -15,7 +15,8 @@ register_tortoise(
 
 # 启动事件
 async def startup_handler():
-  print("Starting up")
+    await init_test_data()
+    print("Starting up")
 
 app.startup_handler(startup_handler)
 
