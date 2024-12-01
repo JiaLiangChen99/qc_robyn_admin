@@ -1,0 +1,272 @@
+{# 表单弹窗组件 #}
+<div class="modal fade" id="formModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="dataForm">
+                    <div id="formFields"></div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="submitForm()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% macro form_scripts() %}
+<script>
+(function() {
+    let formModal = null;
+    let currentAction = 'add';
+    let currentId = null;
+
+    // 确保在 DOM 加载完成后初始化
+    document.addEventListener('DOMContentLoaded', function() {
+        formModal = new bootstrap.Modal(document.getElementById('formModal'));
+        console.log('Form modal initialized:', formModal);
+    });
+
+    // 显示表单弹窗
+    window.showFormModal = function(action, data) {
+        console.log('Show form modal:', action, data);
+        
+        if (!formModal) {
+            formModal = new bootstrap.Modal(document.getElementById('formModal'));
+        }
+
+        const config = window.serverConfig;
+        if (!config) {
+            console.error('Server config not found');
+            return;
+        }
+
+        currentAction = action;
+        const title = document.getElementById('modalTitle');
+        const formFields = document.getElementById('formFields');
+        
+        // 清空表单
+        formFields.innerHTML = '';
+        
+        // 设置标题
+        title.textContent = action === 'add' ? config.addFormTitle : config.editFormTitle;
+        
+        // 获取字段配置
+        const fields = action === 'add' ? config.addFormFields : config.formFields;
+        
+        // 生成表单字段
+        fields.forEach(field => {
+            if (!field.readonly) {
+                const div = document.createElement('div');
+                div.className = 'mb-3';
+                div.innerHTML = generateFieldHtml(field, data);
+                formFields.appendChild(div);
+            }
+        });
+        
+        // 如果是编辑，填充数据
+        if (action === 'edit' && data) {
+            currentId = data.id;
+            fields.forEach(field => {
+                const input = document.getElementById(field.name);
+                if (input && data[field.name] !== undefined) {
+                    if (field.field_type === 'select') {
+                        Array.from(input.options).forEach(option => {
+                            if (option.value == data[field.name]) {
+                                option.selected = true;
+                            }
+                        });
+                    } else {
+                        input.value = data[field.name];
+                    }
+                }
+            });
+        } else {
+            currentId = null;
+        }
+        
+        // 显示弹窗
+        formModal.show();
+    };
+
+    // 生成字段HTML
+    function generateFieldHtml(field, data) {
+        let html = `
+            <label for="${field.name}" class="form-label">
+                ${field.label}
+                ${field.required ? '<span class="text-danger">*</span>' : ''}
+            </label>
+        `;
+        
+        if (field.field_type === 'select' && field.choices) {
+            // 处理选择框
+            html += `
+                <select class="form-control" id="${field.name}" name="${field.name}"
+                        ${field.required ? 'required' : ''}>
+                    <option value="">请选择</option>
+                    ${Object.entries(field.choices).map(([label, value]) => 
+                        `<option value="${value}" ${data && data[field.name] == value ? 'selected' : ''}>
+                            ${label}
+                        </option>`
+                    ).join('')}
+                </select>
+            `;
+        } else if (field.field_type === 'picture_upload') {
+            // 处理图片上传
+            html += `
+                <div class="mb-2">
+                    <img id="${field.name}_preview" src="${data ? data[field.name] : ''}" 
+                         style="max-width: 200px; max-height: 200px; display: ${data && data[field.name] ? 'block' : 'none'}" 
+                         class="img-thumbnail">
+                </div>
+                <input type="file" 
+                       class="form-control" 
+                       id="${field.name}" 
+                       name="${field.name}"
+                       accept="${field.accept || 'image/*'}"
+                       ${field.required ? 'required' : ''}
+                       onchange="handleFileUpload(this, '${field.name}')">
+                <input type="hidden" id="${field.name}_url" name="${field.name}" value="${data ? data[field.name] : ''}">
+            `;
+        } else {
+            // 处理其他类型的输入框
+            const inputType = getInputType(field.field_type);
+            html += `
+                <input type="${inputType}" 
+                       class="form-control" 
+                       id="${field.name}" 
+                       name="${field.name}"
+                       ${field.required ? 'required' : ''}
+                       ${field.placeholder ? `placeholder="${field.placeholder}"` : ''}
+                       ${field.help_text ? `title="${field.help_text}"` : ''}>
+            `;
+        }
+        
+        // 添加帮助文本
+        if (field.help_text) {
+            html += `<div class="form-text text-muted">${field.help_text}</div>`;
+        }
+        
+        return html;
+    }
+
+    // 获取输入类型
+    function getInputType(fieldType) {
+        switch (fieldType) {
+            case 'password': return 'password';
+            case 'email': return 'email';
+            case 'date': return 'date';
+            case 'datetime': return 'datetime-local';
+            case 'number': return 'number';
+            case 'picture_upload': return 'file';
+            default: return 'text';
+        }
+    }
+
+    // 修改提交表单函数
+    window.submitForm = async function() {
+        try {
+            const config = window.serverConfig;
+            const form = document.getElementById('dataForm');
+            
+            // 创建 FormData 对象
+            const formData = new FormData(form);
+            
+            // 获取字段配置
+            const fields = currentAction === 'add' ? config.addFormFields : config.formFields;
+            
+            // 处理文件上传字段
+            fields.forEach(field => {
+                if (field.field_type === 'picture_upload') {
+                    // 使用隐藏字段中的 URL 替换文件输入框的值
+                    const urlInput = document.getElementById(`${field.name}_url`);
+                    if (urlInput && urlInput.value) {
+                        formData.set(field.name, urlInput.value);
+                    } else {
+                        formData.delete(field.name);  // 如果没有上传文件，删除该字段
+                    }
+                }
+            });
+            
+            // 构建请求 URL
+            const url = currentAction === 'add' 
+                ? `/admin/${config.modelName}/add`
+                : `/admin/${config.modelName}/${currentId}/edit`;
+            
+            // 将 FormData 转换为 URLSearchParams
+            const params = new URLSearchParams();
+            for (let [key, value] of formData.entries()) {
+                params.append(key, value);
+            }
+            
+            // 发送请求
+            const response = await fetch(url, {
+                method: 'POST',
+                body: params
+            });
+            
+            if (!response.ok) {
+                throw new Error('操作失败');
+            }
+            
+            // 关闭弹窗并刷新表格
+            formModal.hide();
+            $('#dataTable').bootstrapTable('refresh');
+            
+        } catch (error) {
+            console.error('提交失败:', error);
+            alert('操作失败，请重试');
+        }
+    };
+
+    // 添加文件上传处理函数
+    window.handleFileUpload = async function(input, fieldName) {
+        if (!input.files || !input.files[0]) return;
+        
+        const file = input.files[0];
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        // 获取字段配置
+        const config = window.serverConfig;
+        const fields = currentAction === 'add' ? config.addFormFields : config.formFields;
+        const fieldConfig = fields.find(f => f.name === fieldName);
+        
+        // 添加上传路径参数
+        if (fieldConfig && fieldConfig.upload_path) {
+            formData.append('upload_path', fieldConfig.upload_path);
+        }
+        
+        try {
+            const response = await fetch('/admin/upload', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                // 更新预览图
+                const preview = document.getElementById(`${fieldName}_preview`);
+                preview.src = result.data.url;
+                preview.style.display = 'block';
+                
+                // 更新隐藏的URL输入框
+                document.getElementById(`${fieldName}_url`).value = result.data.url;
+            } else {
+                alert(result.message || '上传失败');
+                input.value = '';  // 清空文件输入框
+            }
+        } catch (error) {
+            console.error('Upload error:', error);
+            alert('上传失败，请重试');
+            input.value = '';  // 清空文件输入框
+        }
+    };
+})();
+</script>
+{% endmacro %} 

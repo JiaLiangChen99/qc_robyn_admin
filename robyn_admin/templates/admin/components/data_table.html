@@ -1,0 +1,364 @@
+{# 表格组件 #}
+<div class="card">
+    <div class="card-body">
+        <div id="toolbar" class="mb-3">
+            <button class="btn btn-primary" onclick="showFormModal('add')">
+                <i class="bi bi-plus-lg"></i> 添加
+            </button>
+            <button id="batchDelete" class="btn btn-danger" disabled>
+                <i class="bi bi-trash"></i> 批量删除
+            </button>
+            <button id="exportBtn" class="btn btn-success">
+                <i class="bi bi-download"></i> 导出数据
+            </button>
+        </div>
+        <div class="table-responsive">
+            <table id="dataTable"></table>
+        </div>
+    </div>
+</div>
+
+{% macro table_scripts() %}
+<script>
+$(document).ready(function() {
+    if (!window.serverConfig) {
+        console.error('serverConfig not initialized');
+        return;
+    }
+
+    var config = window.serverConfig;
+    console.log('Table config:', config);
+    var $table = $('#dataTable');
+    
+    // 构建表格列配置
+    var columns = [{checkbox: true}];
+    config.tableFields.forEach(function(field) {
+        if (!field.hidden) {
+            var column = {
+                field: field.name,
+                title: field.label,
+                formatter: function(value, row) {
+                    if (row.display && row.display[field.name] !== undefined) {
+                        return row.display[field.name];
+                    }
+                    if (row.data && row.data[field.name] !== undefined) {
+                        return row.data[field.name];
+                    }
+                    return value || '';
+                }
+            };
+            if (field.sortable) column.sortable = true;
+            if (field.width) column.width = field.width;
+            columns.push(column);
+        }
+    });
+
+    // 如果启用编辑功能，添加操作列
+    if (config.enableEdit) {
+        columns.push({
+            field: 'operate',
+            title: '操作',
+            width: 100,
+            formatter: function(value, row) {
+                try {
+                    const safeData = Object.assign({}, row.data);
+                    delete safeData.display;
+                    const encodedData = encodeURIComponent(JSON.stringify(safeData));
+                    return `<button class="btn btn-sm btn-warning" 
+                            onclick="handleAction('edit', '${safeData.id}', decodeURIComponent('${encodedData}'))">
+                            <i class="bi bi-pencil"></i> 编辑
+                            </button>`;
+                } catch (error) {
+                    console.error('Error formatting edit button:', error, row);
+                    return '<button class="btn btn-sm btn-warning" disabled>编辑</button>';
+                }
+            }
+        });
+    }
+
+    // 初始化表格
+    $table.bootstrapTable({
+        url: `/admin/${config.modelName}/data`,
+        method: 'GET',
+        columns: columns,
+        toggle: 'table',
+        pagination: true,
+        sidePagination: 'server',
+        pageNumber: 1,
+        pageSize: config.pageSize,
+        pageList: [10, 25, 50, 100],
+        search: true,
+        showColumns: true,
+        showRefresh: true,
+        showToggle: true,
+        clickToSelect: true,
+        toolbar: '#toolbar',
+        locale: 'zh-CN',
+        cache: false,
+        maintainMetaData: true,
+        queryParamsType: 'limit',
+        queryParams: function(params) {
+            // 构建查询参数
+            var p = {
+                limit: params.limit,      // 每页记录数
+                offset: params.offset,    // 起始记录
+                search: params.search,    // 搜索关键字
+                sort: params.sort,        // 排序字段
+                order: params.order       // 排序方式
+            };
+            console.log('Query params:', p);
+            return p;
+        },
+        responseHandler: function(res) {
+            console.log('Server response:', res);
+            if (!res || !res.data) {
+                console.error('Invalid response data:', res);
+                return { total: 0, rows: [] };
+            }
+            
+            // 处理返回的数据
+            var result = {
+                total: parseInt(res.total),  // 总记录数
+                rows: res.data.map(function(item) {
+                    return {
+                        ...item.data,
+                        display: item.display
+                    };
+                })
+            };
+            console.log('Processed result:', result);
+            return result;
+        },
+        onLoadSuccess: function(data) {
+            console.log('Table data loaded:', data);
+            console.log('Total records:', data.total);
+            console.log('Current page data:', data.rows.length);
+        },
+        onLoadError: function(status, res) {
+            console.error('Table load error:', status, res);
+            alert('加载数据失败，请刷新页面重试');
+        },
+        onPageChange: function(number, size) {
+            console.log('Page changed to:', number, 'Size:', size);
+        }
+    });
+
+    // 监听表格选择事件
+    $table.on('check.bs.table uncheck.bs.table check-all.bs.table uncheck-all.bs.table',
+        function () {
+            var selections = $table.bootstrapTable('getSelections');
+            $('#batchDelete').prop('disabled', !selections.length);
+            // 更新选中提示
+            updateSelectionInfo(selections.length);
+        }
+    );
+
+    // 添加选中信息提示区域
+    var $toolbar = $('#toolbar');
+    $('<div/>', {
+        id: 'selectionInfo',
+        class: 'alert alert-info d-none mt-2',
+        role: 'alert'
+    }).appendTo($toolbar);
+
+    // 更新选中信息
+    function updateSelectionInfo(count) {
+        var $info = $('#selectionInfo');
+        if (count > 0) {
+            $info.html(`已选择 ${count} 条记录 <button class="btn btn-link btn-sm p-0 ms-2" onclick="clearSelection()">清除选择</button>`);
+            $info.removeClass('d-none');
+        } else {
+            $info.addClass('d-none');
+        }
+    }
+
+    // 清除选择
+    window.clearSelection = function() {
+        $table.bootstrapTable('uncheckAll');
+    };
+
+    // 批量删除功能
+    $('#batchDelete').click(function() {
+        var selections = $table.bootstrapTable('getSelections');
+        if (!selections.length) {
+            alert('请选择要删除的记录');
+            return;
+        }
+
+        if (!confirm(`确定要删除选中的 ${selections.length} 条记录吗？`)) {
+            return;
+        }
+
+        var ids = selections.map(function(item) {
+            return item.id;
+        });
+
+        // 显示加载提示
+        var $btn = $(this);
+        var originalText = $btn.html();
+        $btn.prop('disabled', true)
+            .html('<i class="bi bi-hourglass-split"></i> 删除中...');
+
+        // 发送批量删除请求
+        $.ajax({
+            url: `/admin/${config.modelName}/batch_delete`,
+            method: 'POST',
+            data: { ids: ids },
+            dataType: 'json',  // 指定响应类型为 JSON
+            success: function(response) {
+                // 根据响应中的 success 字段判断是否成功
+                if (response.success) {
+                    // 显示成功提示
+                    var $alert = $('<div/>', {
+                        class: 'alert alert-success alert-dismissible fade show mt-2',
+                        role: 'alert'
+                    }).html(`
+                        ${response.message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    `);
+                    $('#toolbar').append($alert);
+                    
+                    // 自动关闭提示
+                    setTimeout(function() {
+                        $alert.alert('close');
+                    }, 3000);
+
+                    // 刷新表格
+                    $table.bootstrapTable('refresh');
+                    
+                    // 清除选择
+                    $table.bootstrapTable('uncheckAll');
+                } else {
+                    // 显示错误提示
+                    var $alert = $('<div/>', {
+                        class: 'alert alert-danger alert-dismissible fade show mt-2',
+                        role: 'alert'
+                    }).html(`
+                        ${response.message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    `);
+                    $('#toolbar').append($alert);
+                    
+                    // 自动关闭提示
+                    setTimeout(function() {
+                        $alert.alert('close');
+                    }, 3000);
+                }
+            },
+            error: function(xhr) {
+                var message = '删除失败，请重试';
+                try {
+                    var response = JSON.parse(xhr.responseText);
+                    message = response.message || message;
+                } catch (e) {
+                    console.error('Error parsing response:', e);
+                }
+                
+                // 显示错误提示
+                var $alert = $('<div/>', {
+                    class: 'alert alert-danger alert-dismissible fade show mt-2',
+                    role: 'alert'
+                }).html(`
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                `);
+                $('#toolbar').append($alert);
+                
+                // 自动关闭提示
+                setTimeout(function() {
+                    $alert.alert('close');
+                }, 3000);
+            },
+            complete: function() {
+                // 恢复按钮状态
+                $btn.prop('disabled', false).html(originalText);
+            }
+        });
+    });
+
+    // 刷新表格数据的函数
+    window.refreshTable = function() {
+        $table.bootstrapTable('refresh', {
+            silent: false,
+            reset: true  // 重置页码和其他状态
+        });
+    };
+
+    // 导出数据功能
+    $('#exportBtn').click(function() {
+        // 获取选中的行
+        var selections = $table.bootstrapTable('getSelections');
+        // 获取显示的列（排除操作列和复选框列）
+        var visibleColumns = $table.bootstrapTable('getVisibleColumns')
+            .filter(function(column) {
+                return column.field !== 'operate' && !column.checkbox;
+            });
+        
+        // 如果没有选中行，使用当前页的所有数据
+        var data = selections.length ? selections : $table.bootstrapTable('getData');
+        
+        // 构建CSV内容
+        var csvContent = '\ufeff'; // 添加BOM，解决中文乱码
+        
+        // 添加表头
+        csvContent += visibleColumns.map(function(column) {
+            return '"' + (column.title || column.field) + '"';
+        }).join(',') + '\n';
+        
+        // 添加数据行
+        data.forEach(function(row) {
+            csvContent += visibleColumns.map(function(column) {
+                var value;
+                // 使用格式化后的显示值
+                if (row.display && row.display[column.field] !== undefined) {
+                    value = row.display[column.field];
+                } else if (row.data && row.data[column.field] !== undefined) {
+                    value = row.data[column.field];
+                } else {
+                    value = row[column.field] || '';
+                }
+                
+                // 处理特殊字符
+                if (typeof value === 'string') {
+                    // 移除HTML标签
+                    value = value.replace(/<[^>]+>/g, '');
+                    // 处理双引号
+                    value = value.replace(/"/g, '""');
+                }
+                
+                return '"' + value + '"';
+            }).join(',') + '\n';
+        });
+        
+        // 创建Blob对象
+        var blob = new Blob([csvContent], {
+            type: 'text/csv;charset=utf-8;'
+        });
+        
+        // 创建下载链接
+        var link = document.createElement('a');
+        var url = URL.createObjectURL(blob);
+        var timestamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
+        var filename = config.modelName + '_export_' + timestamp + '.csv';
+        
+        link.setAttribute('href', url);
+        link.setAttribute('download', filename);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        
+        // 触发下载
+        link.click();
+        
+        // 清理
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        // 提示用户
+        var message = selections.length 
+            ? `已导出 ${selections.length} 条选中数据`
+            : `已导出当前页所有数据`;
+        alert(message);
+    });
+});
+</script>
+{% endmacro %}

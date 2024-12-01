@@ -1,298 +1,60 @@
 {% extends "admin/base.html" %}
+{% from "admin/components/form_modal.html" import form_scripts %}
+{% from "admin/components/data_table.html" import table_scripts %}
+{% from "admin/components/filter_panel.html" import filter_scripts %}
 
 {% block content %}
 <div class="container">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1>{{ model_name }} 列表</h1>
-        <button class="btn btn-primary" onclick="showFormModal('add')">添加</button>
     </div>
 
-    <div class="card mb-4">
-        <div class="card-body">
-            <form method="get" class="row g-3">
-                {% if search_fields %}
-                <div class="col-md-4">
-                    <div class="input-group">
-                        <input type="text" class="form-control" name="search" 
-                               placeholder="搜索..." value="{{ search_term or '' }}">
-                        <button type="submit" class="btn btn-primary">搜索</button>
-                    </div>
-                </div>
-                {% endif %}
+    {# 引入过滤器面板，传递配置 #}
+    {% with filters=frontend_config.filterFields %}
+    {% include "admin/components/filter_panel.html" %}
+    {% endwith %}
 
-                {% if list_filter %}
-                {% for filter_field in list_filter %}
-                <div class="col-md-3">
-                    {% if filter_mappings.get(filter_field) %}
-                        {{ filter_mappings[filter_field].render(filters.get(filter_field), {
-                            'name': filter_field,
-                            'label': field_labels.get(filter_field, filter_field),
-                            'onchange': 'this.form.submit()'
-                        })|safe }}
-                    {% else %}
-                        <select name="{{ filter_field }}" class="form-select" onchange="this.form.submit()">
-                            <option value="">{{ field_labels[filter_field] or filter_field }} (全部)</option>
-                            {% for value, label in filter_choices[filter_field] %}
-                            <option value="{{ value }}" {% if filters.get(filter_field) == value %}selected{% endif %}>
-                                {{ label }}
-                            </option>
-                            {% endfor %}
-                        </select>
-                    {% endif %}
-                </div>
-                {% endfor %}
-                {% endif %}
-            </form>
-        </div>
-    </div>
+    {# 引入数据表格组件 #}
+    {% include "admin/components/data_table.html" %}
 
-    <div class="card">
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover">
-                    <thead>
-                        <tr>
-                            {% for field in fields %}
-                            <th>{{ field_labels[field] or field }}</th>
-                            {% endfor %}
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for obj_wrapper in objects %}
-                        <tr>
-                            {% for field in fields %}
-                            <td>
-                                {% if field in list_display_links %}
-                                <a href="#" data-form-data='{{ obj_wrapper.data|tojson|safe }}'
-                                   onclick="showFormModal('edit', JSON.parse(this.dataset.formData))">
-                                    {{ obj_wrapper.display[field]|safe }}
-                                </a>
-                                {% elif field in list_editable %}
-                                <input type="text" class="form-control form-control-sm" 
-                                       value="{{ obj_wrapper.data[field]|safe }}"
-                                       onchange="updateField('{{ obj_wrapper.data.id }}', '{{ field }}', this.value)">
-                                {% else %}
-                                    {{ obj_wrapper.display[field]|safe }}
-                                {% endif %}
-                            </td>
-                            {% endfor %}
-                            <td>
-                                <button class="btn btn-sm btn-warning" 
-                                        data-form-data='{{ obj_wrapper.data|tojson|safe }}'
-                                        onclick="showFormModal('edit', JSON.parse(this.dataset.formData))">
-                                    编辑
-                                </button>
-                                <button class="btn btn-sm btn-danger" 
-                                        onclick="deleteItem('{{ obj_wrapper.data.id }}')">
-                                    删除
-                                </button>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
+    {# 引入表单弹窗组件 #}
+    {% include "admin/components/form_modal.html" %}
 </div>
-
-<!-- 表单弹窗 -->
-<div class="modal fade" id="formModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="modalTitle">添加/编辑 {{ model_name }}</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <form id="dataForm">
-                    {% for field in form_fields %}
-                    {% if field not in readonly_fields %}
-                    <div class="mb-3">
-                        <label for="{{ field }}" class="form-label">
-                            {{ field_labels[field] or field }}
-                        </label>
-                        {% if form_mappings.get(field) %}
-                            {{ form_mappings[field].render(None, {
-                                'name': field,
-                                'id': field,
-                                'class': 'form-control'
-                            })|safe }}
-                        {% else %}
-                            <input type="text" class="form-control" id="{{ field }}" name="{{ field }}">
-                        {% endif %}
-                    </div>
-                    {% endif %}
-                    {% endfor %}
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                <button type="button" class="btn btn-primary" onclick="submitForm()">保存</button>
-            </div>
-        </div>
-    </div>
-</div>
+{% endblock %}
 
 {% block extra_js %}
-<script>
-// 先声明变量并初始化
-var fields = JSON.parse('{{ fields|tojson|safe }}');
-var globalVars = {
-    'currentAction': 'add',
-    'currentId': null,
-    'modal': null,
-    'formFields': fields
-};
-
-document.addEventListener('DOMContentLoaded', function() {
-    globalVars.modal = new bootstrap.Modal(document.getElementById('formModal'));
-});
-
-function showFormModal(action, data) {
-    globalVars.currentAction = action;
-    const form = document.getElementById('dataForm');
-    const title = document.getElementById('modalTitle');
-    
-    form.reset();
-    
-    if (action === 'edit' && data) {
-        title.textContent = '编辑 {{ model_name }}';
-        try {
-            // 如果data是字符串，则解析它
-            const formData = typeof data === 'string' ? JSON.parse(data) : data;
-            // 确保id存在且有效
-            if (!formData || !formData.id) {
-                console.error('无效的数据:', formData);
-                alert('数据无效，请重试');
-                return;
-            }
-            
-            globalVars.currentId = formData.id;
-            console.log('设置currentId:', globalVars.currentId); // 调试日志
-            
-            // 遍历表单字段并设置值
-            for (const field of globalVars.formFields) {
-                const input = form.elements[field];
-                if (input && formData[field] !== undefined) {
-                    input.value = formData[field];
-                }
-            }
-        } catch (error) {
-            console.error('数据处理失败:', error);
-            console.log('原始数据:', data);
-            alert('加载数据失败，请重试');
-            return;
-        }
-    } else {
-        title.textContent = '添加 {{ model_name }}';
-        globalVars.currentId = null;
-    }
-    
-    globalVars.modal.show();
-}
-
-async function submitForm() {
-    const form = document.getElementById('dataForm');
-    const formData = new FormData(form);
-    const data = {};
-    
-    // 处理表单数据，保持数值类型
-    for (const [key, value] of formData.entries()) {
-        // 检查是否是布尔值或数字
-        if (value === 'true' || value === 'false') {
-            data[key] = value === 'true' ? 1 : 0;
-        } else if (!isNaN(value) && value !== '') {
-            data[key] = Number(value);
-        } else {
-            data[key] = value;
-        }
-    }
-    
-    try {
-        // 确保编辑时有有效的ID
-        if (globalVars.currentAction === 'edit' && !globalVars.currentId) {
-            throw new Error('无效的ID');
-        }
-        
-        const url = globalVars.currentAction === 'add' 
-            ? `/admin/{{ model_name }}/add`
-            : `/admin/{{ model_name }}/${globalVars.currentId}/edit`;
-            
-        console.log('发送请求:', {
-            url: url,
-            action: globalVars.currentAction,
-            id: globalVars.currentId,
-            data: data
-        });
-            
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams(Object.entries(data))
-        });
-        
-        if (response.ok) {
-            globalVars.modal.hide();
-            window.location.reload();
-        } else {
-            const errorText = await response.text();
-            console.error('服务器错误:', errorText);
-            alert('操作失败，请重试');
-        }
-    } catch (error) {
-        console.error('错误:', error);
-        alert('操作失败: ' + error.message);
-    }
-}
-
-async function updateField(id, field, value) {
-    // 处理值的类型
-    let processedValue = value;
-    if (value === 'true' || value === 'false') {
-        processedValue = value === 'true' ? 1 : 0;  // 修改这里，布尔值转换为0/1
-    } else if (!isNaN(value) && value !== '') {
-        processedValue = Number(value);
-    }
-
-    try {
-        const response = await fetch(`/admin/{{ model_name }}/${id}/edit`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({[field]: processedValue})
-        });
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Server error:', errorText);
-            alert('更新失败，请重试');
-            window.location.reload();
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('更新失败，请重试');
-        window.location.reload();
-    }
-}
-
-function deleteItem(id) {
-    if (confirm('确定要删除这条记录吗？')) {
-        fetch('/admin/{{ model_name }}/' + id + '/delete', {
-            method: 'POST'
-        }).then(response => {
-            if (response.ok) {
-                window.location.reload();
-            } else {
-                alert('删除失败，请重试');
-            }
-        });
-    }
-}
+{# 先初始化全局配置 #}
+<script id="configData" type="application/json">
+{{ frontend_config|tojson|safe }}
 </script>
-{% endblock %}
+
+<script type="text/javascript">
+// 从隐藏的 script 标签中获取配置数据
+window.serverConfig = JSON.parse(document.getElementById('configData').textContent);
+console.log('Server config loaded:', window.serverConfig);
+</script>
+
+{# 引入组件脚本 #}
+{{ filter_scripts() }}
+{{ table_scripts() }}
+{{ form_scripts() }}
+
+{# 最后初始化页面操作 #}
+<script type="text/javascript">
+window.handleAction = function(action, id, rowData) {
+    console.log('Action:', action, 'ID:', id);
+    try {
+        var data = typeof rowData === 'string' ? JSON.parse(rowData) : rowData;
+        console.log('Parsed data:', data);
+        
+        if (action === 'edit') {
+            window.showFormModal('edit', data);
+        }
+    } catch (error) {
+        console.error('Error handling action:', error);
+        console.error('Raw rowData:', rowData);
+        alert('操作失败，请重试');
+    }
+};
+</script>
 {% endblock %} 
