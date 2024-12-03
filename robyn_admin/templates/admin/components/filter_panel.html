@@ -18,7 +18,7 @@
                 <select class="form-control" 
                         id="filter_{{ filter.name }}"
                         name="{{ filter.name }}">
-                    <option value="">全部</option>
+                    <option value="">{{ get_text('all', language) }}</option>
                     {% if filter.choices %}
                     {% for value, label in filter.choices.items() %}
                     <option value="{{ value }}">{{ label }}</option>
@@ -31,12 +31,14 @@
                     <input type="date" 
                            class="form-control"
                            id="filter_{{ filter.name }}_start"
-                           name="{{ filter.name }}_start">
-                    <span class="input-group-text">至</span>
+                           name="{{ filter.name }}_start"
+                           placeholder="{{ get_text('start_date', language) }}">
+                    <span class="input-group-text">{{ get_text('date_separator', language) }}</span>
                     <input type="date" 
                            class="form-control"
                            id="filter_{{ filter.name }}_end"
-                           name="{{ filter.name }}_end">
+                           name="{{ filter.name }}_end"
+                           placeholder="{{ get_text('end_date', language) }}">
                 </div>
                 
                 {% elif filter.type == 'number' %}
@@ -45,13 +47,13 @@
                            class="form-control"
                            id="filter_{{ filter.name }}_min"
                            name="{{ filter.name }}_min"
-                           placeholder="最小值">
-                    <span class="input-group-text">至</span>
+                           placeholder="{{ get_text('min_value', language) }}">
+                    <span class="input-group-text">{{ get_text('number_separator', language) }}</span>
                     <input type="number" 
                            class="form-control"
                            id="filter_{{ filter.name }}_max"
                            name="{{ filter.name }}_max"
-                           placeholder="最大值">
+                           placeholder="{{ get_text('max_value', language) }}">
                 </div>
                 {% endif %}
             </div>
@@ -59,10 +61,10 @@
             
             <div class="col-12">
                 <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-search"></i> 搜索
+                    <i class="bi bi-search"></i> {{ get_text('search', language) }}
                 </button>
                 <button type="reset" class="btn btn-secondary">
-                    <i class="bi bi-x-circle"></i> 重置
+                    <i class="bi bi-x-circle"></i> {{ get_text('reset', language) }}
                 </button>
             </div>
         </form>

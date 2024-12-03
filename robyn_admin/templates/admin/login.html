@@ -1,31 +1,28 @@
 {% extends "admin/base.html" %}
 
-{% block title %}登录 - Robyn Admin{% endblock %}
-
 {% block content %}
 <div class="container">
-    <div class="row justify-content-center">
+    <div class="row justify-content-center mt-5">
         <div class="col-md-6 col-lg-4">
-            <div class="card mt-5">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="mb-0">{{ get_text('login', language) }}</h4>
+                </div>
                 <div class="card-body">
-                    <h3 class="card-title text-center mb-4">管理员登录</h3>
                     {% if error %}
-                    <div class="alert alert-danger" role="alert">
-                        {{ error }}
-                    </div>
+                    <div class="alert alert-danger">{{ error }}</div>
                     {% endif %}
-                    <form method="POST" action="/admin/login" enctype="application/x-www-form-urlencoded">
+                    
+                    <form method="post">
                         <div class="mb-3">
-                            <label for="username" class="form-label">用户名</label>
+                            <label for="username" class="form-label">{{ get_text('username', language) }}</label>
                             <input type="text" class="form-control" id="username" name="username" required>
                         </div>
                         <div class="mb-3">
-                            <label for="password" class="form-label">密码</label>
+                            <label for="password" class="form-label">{{ get_text('password', language) }}</label>
                             <input type="password" class="form-control" id="password" name="password" required>
                         </div>
-                        <div class="d-grid">
-                            <button type="submit" class="btn btn-primary">登录</button>
-                        </div>
+                        <button type="submit" class="btn btn-primary w-100">{{ get_text('login', language) }}</button>
                     </form>
                 </div>
             </div>

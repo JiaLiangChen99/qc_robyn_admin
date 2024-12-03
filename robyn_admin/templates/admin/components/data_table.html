@@ -1,17 +1,7 @@
 {# 表格组件 #}
 <div class="card">
     <div class="card-body">
-        <div id="toolbar" class="mb-3">
-            <button class="btn btn-primary" onclick="showFormModal('add')">
-                <i class="bi bi-plus-lg"></i> 添加
-            </button>
-            <button id="batchDelete" class="btn btn-danger" disabled>
-                <i class="bi bi-trash"></i> 批量删除
-            </button>
-            <button id="exportBtn" class="btn btn-success">
-                <i class="bi bi-download"></i> 导出数据
-            </button>
-        </div>
+        <div id="toolbar" class="mb-3"></div>
         <div class="table-responsive">
             <table id="dataTable"></table>
         </div>
@@ -20,7 +10,40 @@
 
 {% macro table_scripts() %}
 <script>
+// 只保留功能相关的翻译
+var translations = {
+    selected_items: "{{ get_text('selected_items', language) }}",
+    clear_selection: "{{ get_text('clear_selection', language) }}",
+    please_select_items: "{{ get_text('please_select_items', language) }}",
+    confirm_batch_delete: "{{ get_text('confirm_batch_delete', language) }}",
+    deleting: "{{ get_text('deleting', language) }}",
+    export_selected: "{{ get_text('export_selected', language) }}",
+    export_current: "{{ get_text('export_current', language) }}",
+    load_failed: "{{ get_text('load_failed', language) }}",
+    delete_success: "{{ get_text('delete_success', language) }}",
+    delete_failed: "{{ get_text('delete_failed', language) }}",
+    add: "{{ get_text('add', language) }}",
+    batch_delete: "{{ get_text('batch_delete', language) }}",
+    export: "{{ get_text('export', language) }}"
+};
+
+function renderToolbar() {
+    var $toolbar = $('#toolbar');
+    $toolbar.empty().append(`
+        <button class="btn btn-primary" onclick="showFormModal('add')">
+            <i class="bi bi-plus-lg"></i> ${translations.add}
+        </button>
+        <button id="batchDelete" class="btn btn-danger" disabled>
+            <i class="bi bi-trash"></i> ${translations.batch_delete}
+        </button>
+        <button id="exportBtn" class="btn btn-success">
+            <i class="bi bi-download"></i> ${translations.export}
+        </button>
+    `);
+}
+
 $(document).ready(function() {
+    renderToolbar();
     if (!window.serverConfig) {
         console.error('serverConfig not initialized');
         return;
@@ -57,7 +80,7 @@ $(document).ready(function() {
     if (config.enableEdit) {
         columns.push({
             field: 'operate',
-            title: '操作',
+            title: '操作',  // 使用固定文本
             width: 100,
             formatter: function(value, row) {
                 try {
@@ -93,7 +116,7 @@ $(document).ready(function() {
         showToggle: true,
         clickToSelect: true,
         toolbar: '#toolbar',
-        locale: 'zh-CN',
+        locale: 'en-US',
         cache: false,
         maintainMetaData: true,
         queryParamsType: 'limit',
@@ -136,7 +159,7 @@ $(document).ready(function() {
         },
         onLoadError: function(status, res) {
             console.error('Table load error:', status, res);
-            alert('加载数据失败，请刷新页面重试');
+            alert(translations.load_failed);
         },
         onPageChange: function(number, size) {
             console.log('Page changed to:', number, 'Size:', size);
@@ -165,7 +188,12 @@ $(document).ready(function() {
     function updateSelectionInfo(count) {
         var $info = $('#selectionInfo');
         if (count > 0) {
-            $info.html(`已选择 ${count} 条记录 <button class="btn btn-link btn-sm p-0 ms-2" onclick="clearSelection()">清除选择</button>`);
+            $info.html(
+                translations.selected_items.replace('{count}', count) + 
+                ` <button class="btn btn-link btn-sm p-0 ms-2" onclick="clearSelection()">
+                    ${translations.clear_selection}
+                </button>`
+            );
             $info.removeClass('d-none');
         } else {
             $info.addClass('d-none');
@@ -181,11 +209,11 @@ $(document).ready(function() {
     $('#batchDelete').click(function() {
         var selections = $table.bootstrapTable('getSelections');
         if (!selections.length) {
-            alert('请选择要删除的记录');
+            alert(translations.please_select_items);
             return;
         }
 
-        if (!confirm(`确定要删除选中的 ${selections.length} 条记录吗？`)) {
+        if (!confirm(translations.confirm_batch_delete.replace('{count}', selections.length))) {
             return;
         }
 
@@ -197,23 +225,22 @@ $(document).ready(function() {
         var $btn = $(this);
         var originalText = $btn.html();
         $btn.prop('disabled', true)
-            .html('<i class="bi bi-hourglass-split"></i> 删除中...');
+            .html(`<i class="bi bi-hourglass-split"></i> ${translations.deleting}`);
 
         // 发送批量删除请求
         $.ajax({
             url: `/admin/${config.modelName}/batch_delete`,
             method: 'POST',
             data: { ids: ids },
-            dataType: 'json',  // 指定响应类型为 JSON
+            dataType: 'json',  // 指定���应类型为 JSON
             success: function(response) {
-                // 根据响应中的 success 字段判断是否成功
                 if (response.success) {
                     // 显示成功提示
                     var $alert = $('<div/>', {
                         class: 'alert alert-success alert-dismissible fade show mt-2',
                         role: 'alert'
                     }).html(`
-                        ${response.message}
+                        ${response.message || translations.delete_success}
                         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                     `);
                     $('#toolbar').append($alert);
@@ -234,7 +261,7 @@ $(document).ready(function() {
                         class: 'alert alert-danger alert-dismissible fade show mt-2',
                         role: 'alert'
                     }).html(`
-                        ${response.message}
+                        ${response.message || translations.delete_failed}
                         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                     `);
                     $('#toolbar').append($alert);
@@ -246,7 +273,7 @@ $(document).ready(function() {
                 }
             },
             error: function(xhr) {
-                var message = '删除失败，请重试';
+                var message = translations.delete_failed;
                 try {
                     var response = JSON.parse(xhr.responseText);
                     message = response.message || message;
@@ -305,7 +332,7 @@ $(document).ready(function() {
             return '"' + (column.title || column.field) + '"';
         }).join(',') + '\n';
         
-        // 添加数据行
+        // 添加数据���
         data.forEach(function(row) {
             csvContent += visibleColumns.map(function(column) {
                 var value;
@@ -355,10 +382,25 @@ $(document).ready(function() {
         
         // 提示用户
         var message = selections.length 
-            ? `已导出 ${selections.length} 条选中数据`
-            : `已导出当前页所有数据`;
+            ? translations.export_selected.replace('{count}', selections.length)
+            : translations.export_current;
         alert(message);
     });
 });
+
+// 修改语言切换函数
+window.setLanguage = function(lang) {
+    $.ajax({
+        url: '/admin/set_language',
+        method: 'POST',
+        data: { language: lang },
+        success: function() {
+            location.reload();
+        },
+        error: function() {
+            alert(translations.switch_language_failed);
+        }
+    });
+};
 </script>
 {% endmacro %}

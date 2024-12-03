@@ -46,16 +46,26 @@
                     </li>
                 </ul>
                 <ul class="navbar-nav">
-                    {% if user is defined and user %}
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="languageDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-globe"></i>
+                            {{ 'English' if language == 'en_US' else '中文' }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="#" onclick="setLanguage('zh_CN')">中文</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="setLanguage('en_US')">English</a></li>
+                        </ul>
+                    </li>
+                    {% if user %}
                     <li class="nav-item">
-                        <span class="nav-link">欢迎, {{ user.username }}</span>
+                        <span class="nav-link">{{ get_text('welcome', language) }}, {{ user.username }}</span>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="/admin/logout">退出</a>
+                        <a class="nav-link" href="/admin/logout">{{ get_text('logout', language) }}</a>
                     </li>
                     {% else %}
                     <li class="nav-item">
-                        <a class="nav-link" href="/admin/login">登录</a>
+                        <a class="nav-link" href="/admin/login">{{ get_text('login', language) }}</a>
                     </li>
                     {% endif %}
                 </ul>
@@ -68,17 +78,41 @@
             {% if user is defined and user %}
             <nav id="sidebar" class="col-md-3 col-lg-2 d-md-block bg-light sidebar collapse">
                 <div class="sidebar-sticky">
-                    <ul class="nav flex-column">
-                        {% if models is defined %}
-                        {% for model_name, model_admin in models.items() %}
-                        <li class="nav-item">
-                            <a class="nav-link" href="/admin/{{ model_name }}">
-                                {{ model_name }}
-                            </a>
-                        </li>
-                        {% endfor %}
+                    {% if models is defined %}
+                    {# 按菜单组组织模型 #}
+                    {% set menu_groups = {} %}
+                    {% for model_name, model_admin in models.items() %}
+                        {% if model_admin.menu_group not in menu_groups %}
+                            {% set _ = menu_groups.update({model_admin.menu_group: []}) %}
                         {% endif %}
-                    </ul>
+                        {% set _ = menu_groups[model_admin.menu_group].append((model_name, model_admin)) %}
+                    {% endfor %}
+                    
+                    {# 渲染菜单组 #}
+                    {% for group_name, items in menu_groups.items()|sort(attribute='0') %}
+                        {% set menu_item = menus.get(group_name, {'icon': 'bi bi-folder'}) %}
+                        <div class="nav-group mb-2">
+                            <a class="nav-link nav-group-toggle" data-bs-toggle="collapse" 
+                               href="#menu-{{ group_name|lower|replace(' ', '-') }}" role="button">
+                                <i class="{{ menu_item.icon }}"></i>
+                                {{ group_name }}
+                            </a>
+                            <div class="collapse show" id="menu-{{ group_name|lower|replace(' ', '-') }}">
+                                <ul class="nav flex-column ms-3">
+                                    {% for model_name, model_admin in items|sort(attribute='1.menu_order') %}
+                                    <li class="nav-item">
+                                        <a class="nav-link{% if model_name == current_model %} active{% endif %}" 
+                                           href="/admin/{{ model_name }}">
+                                            <i class="{{ model_admin.menu_icon }}"></i>
+                                            {{ model_admin.verbose_name }}
+                                        </a>
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                        </div>
+                    {% endfor %}
+                    {% endif %}
                 </div>
             </nav>
             {% endif %}
@@ -95,6 +129,22 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.22.1/dist/bootstrap-table.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.22.1/dist/locale/bootstrap-table-zh-CN.min.js"></script>
     
-    {% block extra_js %}{% endblock %}
+    {% block extra_js %}
+    <script>
+    function setLanguage(lang) {
+        $.ajax({
+            url: '/admin/set_language',
+            method: 'POST',
+            data: { language: lang },
+            success: function() {
+                location.reload();
+            },
+            error: function() {
+                alert('切换语言失败');
+            }
+        });
+    }
+    </script>
+    {% endblock %}
 </body>
 </html> 

@@ -11,6 +11,7 @@ from datetime import datetime
 from types import ModuleType
 from urllib.parse import parse_qs
 import traceback
+from dataclasses import dataclass
 
 from ..models import AdminUser
 from .fields import (
@@ -21,7 +22,16 @@ from .filters import (
     FilterField, SelectFilter, DateRangeFilter, 
     NumberRangeFilter, BooleanFilter, FilterType
 )
+from ..i18n.translations import get_text
 
+@dataclass
+class MenuItem:
+    """菜单项配置"""
+    name: str                    # 菜单名称
+    icon: str = ""              # 图标类名 (Bootstrap Icons)
+    parent: Optional[str] = None # 父菜单名称
+    order: int = 0              # 排序值
+    
 class ModelAdmin:
     """模型管理类
     
@@ -113,9 +123,24 @@ class ModelAdmin:
     search_fields: List[SearchField] = []
     filter_fields: List[FilterField] = []
     
+    # 模型显示名称
+    verbose_name: str = ""
+    
+    # 菜单配置
+    menu_group: str = ""     # 所属菜单组
+    menu_icon: str = ""      # 菜单图标
+    menu_order: int = 0      # 菜单排序
+    
     def __init__(self, model: Type[Model]):
         self.model = model
+        # 如果没有设置 verbose_name，使用模型名称
+        if not self.verbose_name:
+            self.verbose_name = model.__name__
         self._process_fields()
+        
+        # 如果没有设置菜单组，使用默认分组
+        if not self.menu_group:
+            self.menu_group = "系统管理"
         
     def _process_fields(self):
         """处理字段配置，生成便捷属性"""
@@ -172,18 +197,6 @@ class ModelAdmin:
             field.name for field in self.table_fields 
             if field.visible and field.is_link
         ]
-        
-        # 如果没有定义 search_fields，从 table_fields 生成
-        if not self.search_fields:
-            self.search_fields = [
-                SearchField(
-                    name=field.name,
-                    label=field.label,
-                    placeholder=f"输入{field.label}搜索"
-                )
-                for field in self.table_fields 
-                if field.searchable
-            ]
         
         self.list_filter = [
             field.name for field in self.table_fields 
@@ -244,7 +257,7 @@ class ModelAdmin:
         return ['id']
         
     def is_field_editable(self, field_name: str) -> bool:
-        """判断字段是否可在列表页编辑"""
+        """判断字段是否可在列页编辑"""
         for field in self.table_fields:
             if field.name == field_name:
                 return field.editable and not field.readonly
@@ -311,9 +324,9 @@ class ModelAdmin:
                     if field.formatter:
                         try:
                             result[field.name] = field.formatter(value) if value is not None else ''
-                            print(f"    Formatted value: {result[field.name]}")
+                            print(f"Formatted value: {result[field.name]}")
                         except Exception as e:
-                            print(f"    Error formatting field {field.name}: {str(e)}")
+                            print(f"Error formatting field {field.name}: {str(e)}")
                             result[field.name] = str(value) if value is not None else ''
                     else:
                         # 根据字段类型处理
@@ -339,9 +352,9 @@ class ModelAdmin:
                     else:
                         result[field.name] = str(value)
                     
-                print(f"    Final value: {result[field.name]}")
+                print(f"Final value: {result[field.name]}")
             except Exception as e:
-                print(f"  Error processing field {field.name}: {str(e)}")
+                print(f"Error processing field {field.name}: {str(e)}")
                 result[field.name] = ''
         
         return result
@@ -382,7 +395,8 @@ class AdminSite:
         name: str = 'admin',
         db_url: Optional[str] = None,
         modules: Optional[Dict[str, List[Union[str, ModuleType]]]] = None,
-        generate_schemas: bool = True
+        generate_schemas: bool = True,
+        default_language: str = 'en_US'
     ):
         """
         初始化Admin站点
@@ -396,17 +410,32 @@ class AdminSite:
         self.app = app
         self.name = name
         self.models: Dict[str, ModelAdmin] = {}
+        self.default_language = default_language
+        self.menus: Dict[str, MenuItem] = {}  # 添加菜单配置字典
+        
+        # 设置模板
         self._setup_templates()
         
-        # 初始化数库
+        # 初始化数据库
         self.db_url = db_url
         self.modules = modules
         self.generate_schemas = generate_schemas
         self._init_admin_db()
         
-        # 设置路由要在数据初始化之后
+        # 设置路由
         self._setup_routes()
-        self.jinja_template = JinjaTemplate(self.template_dir)
+
+    def _setup_templates(self):
+        """设置模板目录"""
+        current_dir = Path(__file__).parent.parent
+        template_dir = os.path.join(current_dir, 'templates')
+        self.template_dir = template_dir
+        
+        # 创建 Jinja2 环境并添加全局函数
+        self.jinja_template = JinjaTemplate(template_dir)
+        self.jinja_template.env.globals.update({
+            'get_text': get_text
+        })
 
     def _init_admin_db(self):
         """初始化admin数据库"""
@@ -417,7 +446,7 @@ class AdminSite:
             # 如果没有提供配置,试获取已有配置
             if not self.db_url:
                 if not Tortoise._inited:
-                    raise Exception("数据库未初始化,请先配置数据库或提供db_url参数")
+                    raise Exception("数据库未始化,请先配置数据库或提供db_url参数")
                 # 复用现有配置
                 current_config = Tortoise.get_connection("default").config
                 self.db_url = current_config.get("credentials", {}).get("dsn")
@@ -463,50 +492,36 @@ class AdminSite:
             except Exception as e:
                 print(f"创建管理账号失败: {str(e)}")
 
-    def _setup_templates(self):
-        """设置模板录"""
-        current_dir = Path(__file__).parent.parent
-        template_dir = os.path.join(current_dir, 'templates')
-        self.template_dir = template_dir
-        
-
     def _setup_routes(self):
         """设置路由"""
         # 处理根路径和带斜杠的路径
         @self.app.get(f"/{self.name}")
         async def admin_index(request: Request):
-            print("尝试访问admin首页")
             user = await self._get_current_user(request)
             if not user:
-                print("用户未登录，重定向到登录页")
-                return Response(
-                    status_code=307,
-                    description="",
-                    headers={"Location": f"/{self.name}/login"},
-                )
-                
-            print(f"用户已登录: {user.username}")
-            # 打印检查 self.models 的内容
-            print("注册的模型:", self.models)
+                return Response(status_code=307, headers={"Location": f"/{self.name}/login"})
             
+            language = await self._get_language(request)  # 获取语言设置
             context = {
-                "site_title": "Robyn Admin",
-                "models": self.models,  # 确保这里传递了 models
-                "user": user
+                "site_title": get_text("admin_title", language),
+                "models": self.models,
+                "user": user,
+                "language": language  # 传递语言参数
             }
             return self.jinja_template.render_template("admin/index.html", **context)
             
         @self.app.get(f"/{self.name}/login")
         async def admin_login(request: Request):
-            # 如果户已登录，直接重定向到首页
             user = await self._get_current_user(request)
             if user:
-                return Response(
-                    status_code=307,
-                    description="",
-                    headers={"Location": f"/{self.name}"},
-                )
-            return self.jinja_template.render_template("admin/login.html", user=None)
+                return Response(status_code=307, headers={"Location": f"/{self.name}"})
+            
+            language = await self._get_language(request)  # 获取语言设置
+            context = {
+                "user": None,
+                "language": language
+            }
+            return self.jinja_template.render_template("admin/login.html", **context)
             
         @self.app.post(f"/{self.name}/login")
         async def admin_login_post(request: Request):
@@ -542,11 +557,12 @@ class AdminSite:
                 return response
             else:
                 print("登录失败")
-                return self.jinja_template.render_template(
-                    "admin/login.html",
-                    error="户或密码错误",
-                    user=None
-                )
+                context = {
+                    "error": "用户或密码错误",
+                    "user": None
+                }
+                return self.jinja_template.render_template("admin/login.html", **context)
+
                 
         @self.app.get(f"/{self.name}/logout")
         async def admin_logout(request: Request):
@@ -571,7 +587,7 @@ class AdminSite:
         
         @self.app.get(f"/{self.name}/:model_name/search")
         async def model_search(request: Request):
-            """模型页面中，搜索功能用相关接口，进行糊匹配查询结果"""
+            """模型页面中，搜索功能相关接口，进行匹配查询结果"""
             model_name: str = request.path_params.get("model_name")
             user = await self._get_current_user(request)
             if not user:
@@ -646,23 +662,30 @@ class AdminSite:
                     continue
             
             # 准备上下文数据
+            language = await self._get_language(request)
             context = {
                 "model_name": model_name,
+                "current_model": model_name,  # 添加当前模型标识
+                "verbose_name": model_admin.verbose_name,
                 "models": self.models,
+                "menus": self.menus,  # 添加菜单配置
                 "user": user,
+                "language": language,
                 "frontend_config": {
                     "tableData": table_data,
-                    "total": total,  # 添加总记录数
+                    "total": total,
                     "tableFields": [model_admin.serialize_field(field) for field in model_admin.table_fields],
                     "modelName": model_name,
                     "pageSize": model_admin.per_page,
                     "formFields": [field.to_dict() for field in model_admin.form_fields],
                     "addFormFields": [field.to_dict() for field in model_admin.add_form_fields],
-                    "addFormTitle": model_admin.add_form_title or f"添加{model_name}",
-                    "editFormTitle": model_admin.edit_form_title or f"编辑{model_name}",
+                    "addFormTitle": model_admin.add_form_title or f"添加{model_admin.verbose_name}",
+                    "editFormTitle": model_admin.edit_form_title or f"编辑{model_admin.verbose_name}",
                     "searchFields": [field.to_dict() for field in model_admin.search_fields],
                     "filterFields": [field.to_dict() for field in model_admin.filter_fields],
-                    "enableEdit": model_admin.enable_edit
+                    "enableEdit": model_admin.enable_edit,
+                    "language": language,
+                    "verbose_name": model_admin.verbose_name
                 }
             }
             
@@ -812,7 +835,7 @@ class AdminSite:
                 if not model_admin:
                     return Response(status_code=404, description="模型不存在")
 
-                # 从查询参数获取分页和搜索参数
+                # ��查询参数获取分页和搜索参数
                 query_params = request.query_params
                 limit = int(query_params.get('limit', str(model_admin.per_page)))
                 offset = int(query_params.get('offset', '0'))
@@ -825,7 +848,7 @@ class AdminSite:
                 # 构建基础查询
                 base_queryset = await model_admin.get_queryset(None, {})
                 
-                # 处理过滤条件
+                # 处理滤条件
                 for filter_field in model_admin.filter_fields:
                     filter_value = query_params.get(filter_field.name)
                     if filter_value:
@@ -936,7 +959,7 @@ class AdminSite:
                 
                 model_admin = self.models.get(model_name)
                 if not model_admin:
-                    return Response(status_code=404, description="模型不存在", headers={"Location": f"/{self.name}/login"})
+                    return Response(status_code=404, description="型不存在", headers={"Location": f"/{self.name}/login"})
                 
                 # 解析请求数据
                 data = request.body
@@ -1049,6 +1072,46 @@ class AdminSite:
                     "success": False
                 })
         
+        @self.app.post(f"/{self.name}/set_language")
+        async def set_language(request: Request):
+            """设置语言"""
+            try:
+                data = request.body
+                params = parse_qs(data)
+                language = params.get('language', [self.default_language])[0]
+                
+                # 获取当前session
+                session_data = request.headers.get('Cookie')
+                session_dict = {}
+                if session_data:
+                    for item in session_data.split(";"):
+                        if "=" in item:
+                            key, value = item.split("=")
+                            session_dict[key.strip()] = value.strip()
+                        
+                # 更新session中的语言设置
+                session = session_dict.get("session", "{}")
+                data = json.loads(session)
+                data["language"] = language
+                
+                # 构建cookie
+                cookie_value = json.dumps(data)
+                cookie_attrs = [
+                    f"session={cookie_value}",
+                    "HttpOnly",
+                    "SameSite=Lax",
+                    "Path=/",
+                ]
+                
+                return Response(
+                    status_code=200,
+                    description="Language set successfully",
+                    headers={"Set-Cookie": "; ".join(cookie_attrs)}
+                )
+            except Exception as e:
+                print(f"Set language failed: {str(e)}")
+                return Response(status_code=500, description="Set language failed")
+        
     def register_model(self, model: Type[Model], admin_class: Optional[Type[ModelAdmin]] = None):
         """注册模型到admin站点"""
         if admin_class is None:
@@ -1081,4 +1144,35 @@ class AdminSite:
         except Exception as e:
             print(f"获取用户失败: {str(e)}")
             return None
+        
+    async def _get_language(self, request: Request) -> str:
+        """获取当前语言"""
+        try:
+            session_data = request.headers.get('Cookie')
+            if not session_data:
+                return self.default_language
+                
+            session_dict = {}
+            for item in session_data.split(";"):
+                if "=" in item:  # 确保有等号
+                    key, value = item.split("=", 1)  # 只分割第一个等号
+                    session_dict[key.strip()] = value.strip()
+                
+            session = session_dict.get("session")
+            if not session:
+                return self.default_language
+                
+            try:
+                data = json.loads(session)
+                return data.get("language", self.default_language)
+            except json.JSONDecodeError:
+                return self.default_language
+                
+        except Exception as e:
+            print(f"Error getting language: {str(e)}")
+            return self.default_language
+        
+    def register_menu(self, menu_item: MenuItem):
+        """注册菜单项"""
+        self.menus[menu_item.name] = menu_item
         

@@ -2,10 +2,17 @@
 
 A simple yet powerful admin interface for Robyn framework.
 
-## Features
+# login page
+!["login page"](./docs/img/login_page.png)
 
-1. admin for database model
-2. special component for admin
-3. support filter, search, sort, pagination
-4. document
+# model_page
+!["model page"](./docs/img/model_page.png)
 
+## Finish function
+- [x] add admin interface for Robyn framework
+- [x] register Tortoise ORM to Admin Modal 
+- [x] add filter component in admin
+- [x] add language support
+- [ ] optimize UI
+- [ ] support edit of image upload
+- [ ] add support for related tables
