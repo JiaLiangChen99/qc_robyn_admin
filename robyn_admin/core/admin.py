@@ -12,6 +12,7 @@ from types import ModuleType
 from urllib.parse import parse_qs
 import traceback
 from dataclasses import dataclass
+import asyncio
 
 from ..models import AdminUser
 from .fields import (
@@ -32,6 +33,8 @@ class MenuItem:
     parent: Optional[str] = None # 父菜单名称
     order: int = 0              # 排序值
     
+
+
 class ModelAdmin:
     """模型管理类
     
@@ -131,6 +134,7 @@ class ModelAdmin:
     menu_icon: str = ""      # 菜单图标
     menu_order: int = 0      # 菜单排序
     
+    
     def __init__(self, model: Type[Model]):
         self.model = model
         # 如果没有设置 verbose_name，使用模型名称
@@ -138,9 +142,9 @@ class ModelAdmin:
             self.verbose_name = model.__name__
         self._process_fields()
         
-        # 如果没有设置菜单组，使用默认分组
+        # 如果没有设置菜单组使用默认分组
         if not self.menu_group:
-            self.menu_group = "系统管理"
+            self.menu_group = "系管理"
         
     def _process_fields(self):
         """处理字段配置，生成便捷属性"""
@@ -160,7 +164,7 @@ class ModelAdmin:
                 field.readonly = True
                 field.editable = False
                 
-            # 如果是时间字段
+            # 果是时间字段
             elif isinstance(model_field, fields.DatetimeField):
                 field.readonly = True
                 field.sortable = True
@@ -224,6 +228,7 @@ class ModelAdmin:
         if not self.add_form_fields:
             self.add_form_fields = self.form_fields
         
+        
     def get_field(self, field_name: str) -> Optional[TableField]:
         """获取字段配置"""
         return self.table_field_map.get(field_name)
@@ -232,11 +237,64 @@ class ModelAdmin:
         """获取查询集"""
         queryset = self.model.all()
         
-        # 处理过滤条件
-        if params.get('filters'):
-            for field, value in params['filters'].items():
-                if value:
-                    queryset = queryset.filter(**{field: value})
+        # 处理搜索
+        search = params.get('search', '')
+        if search and self.search_fields:
+            from tortoise.expressions import Q
+            import operator
+            from functools import reduce
+            
+            search_conditions = []
+            for field in self.search_fields:
+                try:
+                    query_dict = await field.build_search_query(search)
+                    if query_dict:
+                        if len(query_dict) == 1 and "id" in query_dict and query_dict["id"] is None:
+                            continue  # 跳过没有匹配结果的关联搜索
+                        search_conditions.append(Q(**query_dict))
+                except Exception as e:
+                    print(f"Error building search query for {field.name}: {str(e)}")
+                    continue
+                    
+            if search_conditions:
+                queryset = queryset.filter(reduce(operator.or_, search_conditions))
+        
+        # 处理过滤器
+        for filter_field in self.filter_fields:
+            filter_value = params.get(filter_field.name)
+            if filter_value:
+                try:
+                    query_dict = await filter_field.build_filter_query(filter_value)
+                    if query_dict:
+                        if len(query_dict) == 1 and "id" in query_dict and query_dict["id"] is None:
+                            continue  # 跳过没有匹配结果的关联过滤
+                        queryset = queryset.filter(**query_dict)
+                except Exception as e:
+                    print(f"Error building filter query for {filter_field.name}: {str(e)}")
+                    continue
+        
+        # 处理排序
+        sort = params.get('sort', '')
+        order = params.get('order', 'asc')
+        if sort:
+            # 处理关联字段的排序
+            for field in self.table_fields:
+                if field.name == sort and field.related_model and field.related_key:
+                    # 获取真实的排序字段
+                    field_parts = field.name.split('_')
+                    if len(field_parts) > 1:
+                        related_field = field_parts[-1]
+                        # 使用关联查询进行排序
+                        queryset = queryset.annotate(
+                            sort_field=getattr(field.related_model, related_field)
+                        ).order_by(f"{'-' if order == 'desc' else ''}sort_field")
+                        break
+            else:
+                # 普通字段排序
+                order_by = f"{'-' if order == 'desc' else ''}{sort}"
+                queryset = queryset.order_by(order_by)
+        elif self.default_ordering:
+            queryset = queryset.order_by(*self.default_ordering)
         
         return queryset
         
@@ -305,54 +363,58 @@ class ModelAdmin:
             return str(getattr(obj, field_name, ''))
         return field.format_value(getattr(obj, field_name, ''))
 
-    def serialize_object(self, obj: Model, for_display: bool = True) -> Dict[str, Any]:
-        """将模型对象序列化为字典"""
+    async def serialize_object(self, obj: Model, for_display: bool = True) -> dict:
+        """序列化对象"""
         result = {}
-        
-        # 确保包含 id 字段
         result['id'] = str(getattr(obj, 'id', ''))
-        
-        print(f"Serializing object {obj.id} for {'display' if for_display else 'data'}")
         
         for field in self.table_fields:
             try:
-                value = getattr(obj, field.name, None)
-                print(f"  Field {field.name}: {value} (type: {type(value)})")
-                
-                if for_display:
-                    # 如果有 formatter，使用 formatter 处理
-                    if field.formatter:
+                if field.related_model and field.related_key:
+                    # 获取外键值
+                    fk_value = getattr(obj, field.related_key)
+                    if fk_value:
                         try:
-                            result[field.name] = field.formatter(value) if value is not None else ''
-                            print(f"Formatted value: {result[field.name]}")
+                            # 查询关联对象
+                            related_obj = await field.related_model.get(id=fk_value)
+                            if related_obj:
+                                # 使用关联模型名称来分割字段名
+                                model_name = field.related_model.__name__
+                                if field.name.startswith(model_name + '_'):
+                                    # 移除模型名称前缀，获取实际字段名
+                                    related_field = field.name[len(model_name + '_'):]
+                                else:
+                                    # 如果字段名不符合预期格式，使用默认字段
+                                    related_field = 'id'
+                                print(f"Getting related field: {related_field} from {model_name}")
+                                # 获取关联字段的值
+                                related_value = getattr(related_obj, related_field)
+                                result[field.name] = str(related_value) if related_value is not None else ''
+                                continue
                         except Exception as e:
-                            print(f"Error formatting field {field.name}: {str(e)}")
+                            print(f"Error getting related object: {str(e)}")
+                            print(f"Field name: {field.name}, Related model: {field.related_model.__name__}, Related key: {field.related_key}")
+                
+                    # 如果获取关联对象失败或没有外键值，设置为空字符串
+                    result[field.name] = ''
+                else:
+                    # 处理普通字段
+                    value = getattr(obj, field.name, None)
+                    if for_display:
+                        if field.formatter and value is not None:
+                            try:
+                                if asyncio.iscoroutinefunction(field.formatter):
+                                    result[field.name] = await field.formatter(value)
+                                else:
+                                    result[field.name] = field.formatter(value)
+                            except Exception as e:
+                                print(f"Error formatting field {field.name}: {str(e)}")
+                                result[field.name] = str(value) if value is not None else ''
+                        else:
                             result[field.name] = str(value) if value is not None else ''
                     else:
-                        # 根据字段类型处理
-                        if value is None:
-                            result[field.name] = ''
-                        elif isinstance(value, datetime):
-                            if field.display_type == DisplayType.DATE:
-                                result[field.name] = value.strftime("%Y-%m-%d")
-                            else:
-                                result[field.name] = value.strftime("%Y-%m-%d %H:%M:%S")
-                        elif isinstance(value, bool):
-                            result[field.name] = "是" if value else "否"
-                        else:
-                            result[field.name] = str(value)
-                else:
-                    # 原始数据
-                    if value is None:
-                        result[field.name] = ''
-                    elif isinstance(value, datetime):
-                        result[field.name] = value.strftime("%Y-%m-%d %H:%M:%S")
-                    elif isinstance(value, bool):
-                        result[field.name] = 1 if value else 0
-                    else:
-                        result[field.name] = str(value)
-                    
-                print(f"Final value: {result[field.name]}")
+                        result[field.name] = str(value) if value is not None else ''
+                        
             except Exception as e:
                 print(f"Error processing field {field.name}: {str(e)}")
                 result[field.name] = ''
@@ -387,6 +449,22 @@ class ModelAdmin:
         """获取过滤字段配置"""
         return self.filter_fields
 
+    def get_frontend_config(self) -> dict:
+        """获取前端配置"""
+        return {
+            "tableFields": [field.to_dict() for field in self.table_fields],
+            "modelName": self.model.__name__,
+            "pageSize": self.per_page,
+            "formFields": [field.to_dict() for field in self.form_fields],
+            "addFormFields": [field.to_dict() for field in self.add_form_fields],
+            "addFormTitle": self.add_form_title or f"添加{self.verbose_name}",
+            "editFormTitle": self.edit_form_title or f"编辑{self.verbose_name}",
+            "searchFields": [field.to_dict() for field in self.search_fields],
+            "filterFields": [field.to_dict() for field in self.filter_fields],
+            "enableEdit": self.enable_edit,
+            "verbose_name": self.verbose_name
+        }
+
 class AdminSite:
     """Admin站点主类"""
     def __init__(
@@ -403,7 +481,7 @@ class AdminSite:
         
         :param app: Robyn应用实例
         :param name: Admin路由前缀
-        :param db_url: 数据库连接URL,果为None则尝试复用已有配置
+        :param db_url: 数据库连接URL,果None则尝试复用已有配置
         :param modules: 模型模块配置,如果为None则尝试复用已有配置
         :param generate_schemas: 是否自动生成数据库表构
         """
@@ -446,7 +524,7 @@ class AdminSite:
             # 如果没有提供配置,试获取已有配置
             if not self.db_url:
                 if not Tortoise._inited:
-                    raise Exception("数据库未始化,请先配置数据库或提供db_url参数")
+                    raise Exception("数据库未始化,请配置数据库或提供db_url参数")
                 # 复用现有配置
                 current_config = Tortoise.get_connection("default").config
                 self.db_url = current_config.get("credentials", {}).get("dsn")
@@ -456,19 +534,17 @@ class AdminSite:
                     raise Exception("数据库未初始化,请先配置数据库或提供modules参数")
                 # 用现有modules配
                 self.modules = dict(Tortoise.apps)
-                
+            print("第一次", self.modules)
             # 确保admin模型和用户模型都被加载
             if "models" in self.modules:
                 if isinstance(self.modules["models"], list):
                     if "robyn_admin.models" not in self.modules["models"]:
                         self.modules["models"].append("robyn_admin.models")
-                    if "models" not in self.modules["models"]:
-                        self.modules["models"].append("models")
                 else:
-                    self.modules["models"] = ["robyn_admin.models", "models", self.modules["models"]]
+                    self.modules["models"] = ["robyn_admin.models", self.modules["models"]]
             else:
-                self.modules["models"] = ["robyn_admin.models", "models"]
-            
+                self.modules["models"] = ["robyn_admin.models"]
+            print("第二次", self.modules)
             # 初始化数据库连接
             if not Tortoise._inited:
                 await Tortoise.init(
@@ -494,7 +570,7 @@ class AdminSite:
 
     def _setup_routes(self):
         """设置路由"""
-        # 处理根路径和带斜杠的路径
+        # 处理路径和带斜杠的路径
         @self.app.get(f"/{self.name}")
         async def admin_index(request: Request):
             user = await self._get_current_user(request)
@@ -505,6 +581,7 @@ class AdminSite:
             context = {
                 "site_title": get_text("admin_title", language),
                 "models": self.models,
+                "menus": self.menus,  # 添加menus到上下文
                 "user": user,
                 "language": language  # 传递语言参数
             }
@@ -539,7 +616,7 @@ class AdminSite:
                 cookie_attrs = [
                     f"session={cookie_value}",
                     "HttpOnly",          # 防止JavaScript访问
-                    "SameSite=Lax",     # 防止CSRF攻
+                    "SameSite=Lax",     # 防止CSRF
                     # "Secure"          # 仅在生产环境启用HTTPS时消注释
                     "Path=/",           # cookie的作用路
                 ]
@@ -633,69 +710,70 @@ class AdminSite:
         @self.app.get(f"/{self.name}/:model_name")
         async def model_list(request: Request):
             """模型列表页"""
-            model_name: str = request.path_params.get("model_name")
-            user = await self._get_current_user(request)
-            if not user:
-                return Response(status_code=303, description="", headers={"Location": f"/{self.name}/login"})
-            
-            model_admin = self.models.get(model_name)
-            if not model_admin:
-                return Response(status_code=404, description="模型不存在", headers={"Location": f"/{self.name}/login"})
-            
-            # 获取数据列表包括总数）
-            base_queryset = await model_admin.get_queryset(None, {})
-            total = await base_queryset.count()  # 获取总记录数
-            objects = await base_queryset.limit(model_admin.per_page)  # 获取第一页数据
-            
-            # 准备表格数据
-            table_data = []
-            for obj in objects:
-                try:
-                    display_data = model_admin.serialize_object(obj, for_display=True)
-                    raw_data = model_admin.serialize_object(obj, for_display=False)
-                    table_data.append({
-                        'display': display_data,
-                        'data': raw_data
-                    })
-                except Exception as e:
-                    print(f"Error serializing object {obj.id}: {str(e)}")
-                    continue
-            
-            # 准备上下文数据
-            language = await self._get_language(request)
-            context = {
-                "model_name": model_name,
-                "current_model": model_name,  # 添加当前模型标识
-                "verbose_name": model_admin.verbose_name,
-                "models": self.models,
-                "menus": self.menus,  # 添加菜单配置
-                "user": user,
-                "language": language,
-                "frontend_config": {
-                    "tableData": table_data,
-                    "total": total,
-                    "tableFields": [model_admin.serialize_field(field) for field in model_admin.table_fields],
-                    "modelName": model_name,
-                    "pageSize": model_admin.per_page,
-                    "formFields": [field.to_dict() for field in model_admin.form_fields],
-                    "addFormFields": [field.to_dict() for field in model_admin.add_form_fields],
-                    "addFormTitle": model_admin.add_form_title or f"添加{model_admin.verbose_name}",
-                    "editFormTitle": model_admin.edit_form_title or f"编辑{model_admin.verbose_name}",
-                    "searchFields": [field.to_dict() for field in model_admin.search_fields],
-                    "filterFields": [field.to_dict() for field in model_admin.filter_fields],
-                    "enableEdit": model_admin.enable_edit,
-                    "language": language,
-                    "verbose_name": model_admin.verbose_name
+            try:
+                model_name: str = request.path_params.get("model_name")
+                user = await self._get_current_user(request)
+                if not user:
+                    return Response(status_code=303, description="", headers={"Location": f"/{self.name}/login"})
+                
+                model_admin = self.models.get(model_name)
+                if not model_admin:
+                    return Response(status_code=404, description="模型不存在", headers={"Location": f"/{self.name}/login"})
+                
+                language = await self._get_language(request)
+                
+                # 获取前端配置
+                frontend_config = model_admin.get_frontend_config()
+                # 添加语言配置
+                frontend_config["language"] = language
+                
+                # 添加过滤器配置到上下文
+                filters = [field.to_dict() for field in model_admin.filter_fields]
+                
+                # 添加翻译文本
+                translations = {
+                    "add": get_text("add", language),
+                    "batch_delete": get_text("batch_delete", language),
+                    "confirm_batch_delete": get_text("confirm_batch_delete", language),
+                    "deleting": get_text("deleting", language),
+                    "delete_success": get_text("delete_success", language),
+                    "delete_failed": get_text("delete_failed", language),
+                    "selected_items": get_text("selected_items", language),
+                    "clear_selection": get_text("clear_selection", language),
+                    "please_select_items": get_text("please_select_items", language),
+                    "export": get_text("export", language),
+                    "export_selected": get_text("export_selected", language),
+                    "export_current": get_text("export_current", language),
+                    "load_failed": get_text("load_failed", language),
+                    # 添加过滤器相关的翻译
+                    "search": get_text("search", language),
+                    "reset": get_text("reset", language),
+                    "filter": get_text("filter", language),
+                    "all": get_text("all", language),  # 添加"全部"选项的翻译
                 }
-            }
-            
-            # 调试日志
-            print(f"Model: {model_name}")
-            print(f"Total records: {total}")
-            print(f"First page records: {len(table_data)}")
-            print(f"First row sample: {table_data[0] if table_data else None}")
-            
-            return self.jinja_template.render_template("admin/model_list.html", **context)
+                
+                context = {
+                    "site_title": get_text("admin_title", language),
+                    "models": self.models,
+                    "menus": self.menus,
+                    "user": user,
+                    "language": language,
+                    "current_model": model_name,
+                    "verbose_name": model_admin.verbose_name,
+                    "frontend_config": frontend_config,
+                    "filters": filters,  # 添加过滤器配置到上下文
+                    "translations": translations  # 添加翻译文本到上下文
+                }
+                
+                return self.jinja_template.render_template("admin/model_list.html", **context)
+                
+            except Exception as e:
+                print(f"Error in model_list: {str(e)}")
+                traceback.print_exc()
+                return Response(
+                    status_code=500,
+                    description=f"获取列表页失败: {str(e)}"
+                )
 
 
         @self.app.post(f"/{self.name}/:model_name/add")
@@ -716,7 +794,7 @@ class AdminSite:
             params = parse_qs(data)
             form_data = {key: value[0] for key, value in params.items()}
             
-            # 处理表单数据
+            # 处理表数
             processed_data = {}
             for field in model_admin.add_form_fields:
                 if field.name in form_data:
@@ -826,103 +904,44 @@ class AdminSite:
         async def model_data(request: Request):
             """获取模型数据，支持分页、搜索和排序"""
             try:
-                # 从路径参数获取模型名称
-                print("body", request.body)
-                print("query_params", request.query_params) 
-                print("form", request.form_data)
                 model_name = request.path_params.get("model_name")
                 model_admin = self.models.get(model_name)
                 if not model_admin:
                     return Response(status_code=404, description="模型不存在")
 
-                # ��查询参数获取分页和搜索参数
+                # 查询参数获取分页和搜索参数
                 query_params = request.query_params
                 limit = int(query_params.get('limit', str(model_admin.per_page)))
                 offset = int(query_params.get('offset', '0'))
-                search = query_params.get('search', '')
-                sort = query_params.get('sort', '')
-                order = query_params.get('order', 'asc')
                 
-                print(f"Query params: {query_params}")
+                # 构建查询参数字典
+                params = {
+                    'search': query_params.get('search', ''),
+                    'sort': query_params.get('sort', ''),
+                    'order': query_params.get('order', 'asc')
+                }
+                
+                # 处理过滤器参数
+                for filter_field in model_admin.filter_fields:
+                    field_value = query_params.get(filter_field.name)
+                    if field_value:
+                        params[filter_field.name] = field_value
                 
                 # 构建基础查询
-                base_queryset = await model_admin.get_queryset(None, {})
-                
-                # 处理滤条件
-                for filter_field in model_admin.filter_fields:
-                    filter_value = query_params.get(filter_field.name)
-                    if filter_value:
-                        if filter_field.filter_type == FilterType.INPUT:
-                            # 输入框过滤，使用 icontains
-                            base_queryset = base_queryset.filter(
-                                **{f"{filter_field.name}__{filter_field.operator}": filter_value}
-                            )
-                        elif filter_field.filter_type == FilterType.SELECT:
-                            # 下拉框过滤，使用精确匹配
-                            # 处理布尔值
-                            if filter_value.lower() == 'true':
-                                filter_value = True
-                            elif filter_value.lower() == 'false':
-                                filter_value = False
-                            base_queryset = base_queryset.filter(**{filter_field.name: filter_value})
-                        elif filter_field.filter_type == FilterType.DATE_RANGE:
-                            # 日期范围过滤
-                            start_date = query_params.get(f"{filter_field.name}_start")
-                            end_date = query_params.get(f"{filter_field.name}_end")
-                            if start_date:
-                                base_queryset = base_queryset.filter(
-                                    **{f"{filter_field.name}__gte": start_date}
-                                )
-                            if end_date:
-                                base_queryset = base_queryset.filter(
-                                    **{f"{filter_field.name}__lte": end_date}
-                                )
-                        elif filter_field.filter_type == FilterType.NUMBER_RANGE:
-                            # 数字范围过滤
-                            min_value = query_params.get(f"{filter_field.name}_min")
-                            max_value = query_params.get(f"{filter_field.name}_max")
-                            if min_value:
-                                base_queryset = base_queryset.filter(
-                                    **{f"{filter_field.name}__gte": float(min_value)}
-                                )
-                            if max_value:
-                                base_queryset = base_queryset.filter(
-                                    **{f"{filter_field.name}__lte": float(max_value)}
-                                )
-                
-                # 处理搜索
-                if search and model_admin.search_fields:
-                    from tortoise.expressions import Q
-                    import operator
-                    from functools import reduce
-                    
-                    search_conditions = []
-                    for field in model_admin.search_fields:
-                        search_conditions.append(Q(**{f"{field.name}__icontains": search}))
-                    if search_conditions:
-                        base_queryset = base_queryset.filter(reduce(operator.or_, search_conditions))
-                
-                # 处理排序
-                if sort:
-                    order_by = f"{'-' if order == 'desc' else ''}{sort}"
-                    base_queryset = base_queryset.order_by(order_by)
-                elif model_admin.default_ordering:
-                    base_queryset = base_queryset.order_by(*model_admin.default_ordering)
+                base_queryset = await model_admin.get_queryset(request, params)
                 
                 # 获取总记录数
                 total = await base_queryset.count()
-                print(f"Total records: {total}")
                 
                 # 获取分页数据
                 objects = await base_queryset.offset(offset).limit(limit)
-                print(f"Page records: {len(objects)}")
                 
                 # 序列化数据
                 data = []
                 for obj in objects:
                     try:
-                        display_data = model_admin.serialize_object(obj, for_display=True)
-                        raw_data = model_admin.serialize_object(obj, for_display=False)
+                        display_data = await model_admin.serialize_object(obj, for_display=True)
+                        raw_data = await model_admin.serialize_object(obj, for_display=False)
                         data.append({
                             'display': display_data,
                             'data': raw_data
@@ -931,22 +950,20 @@ class AdminSite:
                         print(f"Error serializing object {obj.id}: {str(e)}")
                         continue
                 
-                # 返回数据
-                response_data = {
+                return jsonify({
                     "total": total,
                     "data": data
-                }
-                print(f"Response: total={total}, page_size={len(data)}")
-                return jsonify(response_data)
+                })
                 
             except Exception as e:
                 print(f"Error in model_data: {str(e)}")
                 traceback.print_exc()
-                return Response(
-                    status_code=500,
-                    description=f"获取数据失败: {str(e)}",
-                    headers={"Content-Type": "application/json"}
-                )
+                return jsonify({
+                    "success": False,
+                    "message": f"获取数据失败: {str(e)}",
+                    "total": 0,
+                    "data": []
+                })
         
         @self.app.post(f"/{self.name}/:model_name/batch_delete")
         async def model_batch_delete(request: Request):
@@ -973,7 +990,7 @@ class AdminSite:
                         headers={"Content-Type": "application/json"}
                     )
                 
-                # 批量删除
+                # 批量除
                 deleted_count = 0
                 for id in ids:
                     try:
@@ -1003,7 +1020,7 @@ class AdminSite:
         
         @self.app.post(f"/{self.name}/upload")
         async def file_upload(request: Request):
-            """处理文件上传"""
+            """处理文件传"""
             try:
                 # 验证用户登录
                 user = await self._get_current_user(request)
@@ -1031,7 +1048,7 @@ class AdminSite:
                     if not file_name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
                         return jsonify({
                             "code": 400,
-                            "message": "不支持的文件类型，仅支持jpg、jpeg、png、gif格式",
+                            "message": "不支持文件类型，仅支持jpg、jpeg、png、gif格式",
                             "success": False
                         })
 
@@ -1113,7 +1130,7 @@ class AdminSite:
                 return Response(status_code=500, description="Set language failed")
         
     def register_model(self, model: Type[Model], admin_class: Optional[Type[ModelAdmin]] = None):
-        """注册模型到admin站点"""
+        """注册模型到admin点"""
         if admin_class is None:
             admin_class = ModelAdmin
         self.models[model.__name__] = admin_class(model)
@@ -1173,6 +1190,4 @@ class AdminSite:
             return self.default_language
         
     def register_menu(self, menu_item: MenuItem):
-        """注册菜单项"""
-        self.menus[menu_item.name] = menu_item
-        
+        """注菜单项"""

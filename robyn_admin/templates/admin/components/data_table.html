@@ -1,4 +1,7 @@
 {# 表格组件 #}
+{% if filters %}
+    {% include "admin/components/filter_panel.html" %}
+{% endif %}
 <div class="card">
     <div class="card-body">
         <div id="toolbar" class="mb-3"></div>
@@ -24,7 +27,10 @@ var translations = {
     delete_failed: "{{ get_text('delete_failed', language) }}",
     add: "{{ get_text('add', language) }}",
     batch_delete: "{{ get_text('batch_delete', language) }}",
-    export: "{{ get_text('export', language) }}"
+    export: "{{ get_text('export', language) }}",
+    search: "{{ get_text('search', language) }}",
+    reset: "{{ get_text('reset', language) }}",
+    all: "{{ get_text('all', language) }}"
 };
 
 function renderToolbar() {
@@ -36,10 +42,87 @@ function renderToolbar() {
         <button id="batchDelete" class="btn btn-danger" disabled>
             <i class="bi bi-trash"></i> ${translations.batch_delete}
         </button>
-        <button id="exportBtn" class="btn btn-success">
-            <i class="bi bi-download"></i> ${translations.export}
-        </button>
+        <div class="btn-group">
+            <button id="exportBtn" class="btn btn-success">
+                <i class="bi bi-download"></i> ${translations.export}
+            </button>
+            <button type="button" class="btn btn-success dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown">
+                <span class="visually-hidden">Toggle Dropdown</span>
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="#" onclick="exportData('all')">
+                    ${translations.export_current}
+                </a></li>
+                <li><a class="dropdown-item" href="#" onclick="exportData('selected')">
+                    ${translations.export_selected}
+                </a></li>
+            </ul>
+        </div>
     `);
+}
+
+// 初始化过滤器功能
+function initializeFilter($table) {
+    // 处理过滤表单提交
+    $('#filterForm').on('submit', function(e) {
+        e.preventDefault();
+        
+        // 收集过滤条件
+        var filterData = {};
+        
+        // 遍历所有过滤字段
+        $('.filter-field').each(function() {
+            var $field = $(this);
+            var name = $field.attr('name');
+            var value = $field.val();
+            
+            // 如果字段有值才添加到过滤条件中
+            if (value) {
+                filterData[name] = value;
+            }
+        });
+        
+        // 获取当前的查询参数
+        var options = $table.bootstrapTable('getOptions');
+        
+        // 合并现有参数和过滤参数
+        var params = {
+            limit: options.pageSize,
+            offset: 0,  // 重置到第一页
+            search: options.searchText || '',
+            sort: options.sortName,
+            order: options.sortOrder,
+            ...filterData  // 添加过滤参数
+        };
+        
+        // 刷新表格
+        $table.bootstrapTable('refreshOptions', {
+            pageNumber: 1,  // 重置到第一页
+            queryParams: function(p) {
+                return { ...p, ...params };
+            }
+        });
+    });
+    
+    // 处理重置按钮
+    $('#filterForm button[type="reset"]').on('click', function() {
+        // 清空所有输入框和选择框
+        $('.filter-field').val('');
+        
+        // 重置表格查询参数
+        $table.bootstrapTable('refreshOptions', {
+            pageNumber: 1,
+            queryParams: function(p) {
+                return {
+                    limit: p.limit,
+                    offset: p.offset,
+                    search: p.search,
+                    sort: p.sort,
+                    order: p.order
+                };
+            }
+        });
+    });
 }
 
 $(document).ready(function() {
@@ -99,6 +182,10 @@ $(document).ready(function() {
         });
     }
 
+    // 添加更多调试日志
+    console.log('Initializing table with URL:', `/admin/${config.modelName}/data`);
+    console.log('Table columns:', columns);
+
     // 初始化表格
     $table.bootstrapTable({
         url: `/admin/${config.modelName}/data`,
@@ -121,16 +208,26 @@ $(document).ready(function() {
         maintainMetaData: true,
         queryParamsType: 'limit',
         queryParams: function(params) {
-            // 构建查询参数
-            var p = {
-                limit: params.limit,      // 每页记录数
-                offset: params.offset,    // 起始记录
-                search: params.search,    // 搜索关键字
-                sort: params.sort,        // 排序字段
-                order: params.order       // 排序方式
+            // 获取所有过滤字段的值
+            var filterData = {};
+            $('.filter-field').each(function() {
+                var $field = $(this);
+                var name = $field.attr('name');
+                var value = $field.val();
+                if (value) {
+                    filterData[name] = value;
+                }
+            });
+
+            // 合并所有参数
+            return {
+                limit: params.limit,
+                offset: params.offset,
+                search: params.search,
+                sort: params.sort,
+                order: params.order,
+                ...filterData  // 添加过滤参数
             };
-            console.log('Query params:', p);
-            return p;
         },
         responseHandler: function(res) {
             console.log('Server response:', res);
@@ -165,6 +262,9 @@ $(document).ready(function() {
             console.log('Page changed to:', number, 'Size:', size);
         }
     });
+
+    // 初始化过滤器
+    initializeFilter($table);
 
     // 监听表格选择事件
     $table.on('check.bs.table uncheck.bs.table check-all.bs.table uncheck-all.bs.table',
@@ -232,7 +332,7 @@ $(document).ready(function() {
             url: `/admin/${config.modelName}/batch_delete`,
             method: 'POST',
             data: { ids: ids },
-            dataType: 'json',  // 指定���应类型为 JSON
+            dataType: 'json',  // 指定应类型为 JSON
             success: function(response) {
                 if (response.success) {
                     // 显示成功提示
@@ -313,16 +413,14 @@ $(document).ready(function() {
 
     // 导出数据功能
     $('#exportBtn').click(function() {
-        // 获取选中的行
-        var selections = $table.bootstrapTable('getSelections');
+        // 获取当前表格的所有数据
+        var data = $table.bootstrapTable('getData');
+        
         // 获取显示的列（排除操作列和复选框列）
         var visibleColumns = $table.bootstrapTable('getVisibleColumns')
             .filter(function(column) {
                 return column.field !== 'operate' && !column.checkbox;
             });
-        
-        // 如果没有选中行，使用当前页的所有数据
-        var data = selections.length ? selections : $table.bootstrapTable('getData');
         
         // 构建CSV内容
         var csvContent = '\ufeff'; // 添加BOM，解决中文乱码
@@ -332,15 +430,14 @@ $(document).ready(function() {
             return '"' + (column.title || column.field) + '"';
         }).join(',') + '\n';
         
-        // 添加数据���
+        // 添加数据
         data.forEach(function(row) {
             csvContent += visibleColumns.map(function(column) {
                 var value;
-                // 使用格式化后的显示值
-                if (row.display && row.display[column.field] !== undefined) {
-                    value = row.display[column.field];
-                } else if (row.data && row.data[column.field] !== undefined) {
-                    value = row.data[column.field];
+                // 获取显示值
+                var cell = $table.find('tr[data-index="' + $table.bootstrapTable('getData').indexOf(row) + '"] td[data-field="' + column.field + '"]');
+                if (cell.length) {
+                    value = cell.text().trim();
                 } else {
                     value = row[column.field] || '';
                 }
@@ -381,9 +478,7 @@ $(document).ready(function() {
         URL.revokeObjectURL(url);
         
         // 提示用户
-        var message = selections.length 
-            ? translations.export_selected.replace('{count}', selections.length)
-            : translations.export_current;
+        var message = translations.export_current;
         alert(message);
     });
 });

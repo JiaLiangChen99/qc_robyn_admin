@@ -1,164 +1,45 @@
-{# 过滤器面板组件 #}
+{# 筛选面板组件 #}
 <div class="card mb-3">
     <div class="card-body">
         <form id="filterForm" class="row g-3">
-            {% for filter in filters %}
+            {% for field in filters %}
             <div class="col-md-3">
-                <label for="filter_{{ filter.name }}" class="form-label">{{ filter.label }}</label>
-                
-                {% if filter.type == 'input' %}
-                <input type="text" 
-                       class="form-control" 
-                       id="filter_{{ filter.name }}"
-                       name="{{ filter.name }}"
-                       placeholder="{{ filter.placeholder }}"
-                       value="{{ filter.default_value or '' }}">
-                
-                {% elif filter.type == 'select' %}
-                <select class="form-control" 
-                        id="filter_{{ filter.name }}"
-                        name="{{ filter.name }}">
-                    <option value="">{{ get_text('all', language) }}</option>
-                    {% if filter.choices %}
-                    {% for value, label in filter.choices.items() %}
-                    <option value="{{ value }}">{{ label }}</option>
-                    {% endfor %}
-                    {% endif %}
-                </select>
-                
-                {% elif filter.type == 'date' %}
-                <div class="input-group">
-                    <input type="date" 
-                           class="form-control"
-                           id="filter_{{ filter.name }}_start"
-                           name="{{ filter.name }}_start"
-                           placeholder="{{ get_text('start_date', language) }}">
-                    <span class="input-group-text">{{ get_text('date_separator', language) }}</span>
-                    <input type="date" 
-                           class="form-control"
-                           id="filter_{{ filter.name }}_end"
-                           name="{{ filter.name }}_end"
-                           placeholder="{{ get_text('end_date', language) }}">
-                </div>
-                
-                {% elif filter.type == 'number' %}
-                <div class="input-group">
-                    <input type="number" 
-                           class="form-control"
-                           id="filter_{{ filter.name }}_min"
-                           name="{{ filter.name }}_min"
-                           placeholder="{{ get_text('min_value', language) }}">
-                    <span class="input-group-text">{{ get_text('number_separator', language) }}</span>
-                    <input type="number" 
-                           class="form-control"
-                           id="filter_{{ filter.name }}_max"
-                           name="{{ filter.name }}_max"
-                           placeholder="{{ get_text('max_value', language) }}">
-                </div>
+                <label class="form-label">{{ field.label }}</label>
+                {% if field.type == 'select' %}
+                    <select name="{{ field.name }}" class="form-select filter-field">
+                        <option value="">{{ translations.all }}</option>
+                        {% for value, label in field.choices.items() %}
+                            <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                {% elif field.type == 'date_range' %}
+                    <div class="input-group">
+                        <input type="date" name="{{ field.name }}_start" class="form-control filter-field">
+                        <span class="input-group-text">-</span>
+                        <input type="date" name="{{ field.name }}_end" class="form-control filter-field">
+                    </div>
+                {% elif field.type == 'number_range' %}
+                    <div class="input-group">
+                        <input type="number" name="{{ field.name }}_min" class="form-control filter-field" placeholder="最小值">
+                        <span class="input-group-text">-</span>
+                        <input type="number" name="{{ field.name }}_max" class="form-control filter-field" placeholder="最大值">
+                    </div>
+                {% else %}
+                    <input type="text" name="{{ field.name }}" class="form-control filter-field" placeholder="{{ field.placeholder }}">
                 {% endif %}
             </div>
             {% endfor %}
             
+            {% if filters %}
             <div class="col-12">
                 <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-search"></i> {{ get_text('search', language) }}
+                    <i class="bi bi-search"></i> {{ translations.search }}
                 </button>
                 <button type="reset" class="btn btn-secondary">
-                    <i class="bi bi-x-circle"></i> {{ get_text('reset', language) }}
+                    <i class="bi bi-x-circle"></i> {{ translations.reset }}
                 </button>
             </div>
+            {% endif %}
         </form>
     </div>
-</div>
-
-{% macro filter_scripts() %}
-<script>
-$(document).ready(function() {
-    // 处理过滤表单提交
-    $('#filterForm').on('submit', function(e) {
-        e.preventDefault();
-        
-        // 收集过滤条件
-        var filterData = {};
-        
-        // 遍历所有表单字段
-        $(this).find('input, select').each(function() {
-            var $field = $(this);
-            var name = $field.attr('name');
-            var value = $field.val();
-            
-            // 如果字段有值才添加到过滤条件中
-            if (value) {
-                filterData[name] = value;
-            }
-        });
-        
-        console.log('Filter data:', filterData);
-        
-        // 刷新表格，将过滤参数作为查询参数
-        var params = {
-            limit: $('#dataTable').bootstrapTable('getOptions').pageSize,
-            offset: 0,  // 重置到第一页
-            search: '',  // 清空搜索
-            ...filterData  // 展开过滤条件
-        };
-        
-        // 使用 URL 参数方式发送请求
-        var queryString = Object.keys(params)
-            .map(key => encodeURIComponent(key) + '=' + encodeURIComponent(params[key]))
-            .join('&');
-            
-        // 刷新表格
-        $('#dataTable').bootstrapTable('refreshOptions', {
-            url: `/admin/${window.serverConfig.modelName}/data?${queryString}`,
-            pageNumber: 1
-        });
-    });
-    
-    // 处理重置按钮
-    $('#filterForm button[type="reset"]').on('click', function() {
-        // 清空所有输入框和选择框
-        $('#filterForm').find('input, select').val('');
-        
-        // 延迟提交表单，确保值被清空
-        setTimeout(function() {
-            $('#filterForm').submit();
-        }, 0);
-    });
-
-    // 监听日期范围输入框变化
-    $('input[type="date"]').on('change', function() {
-        var $field = $(this);
-        var baseName = $field.attr('name').replace('_start', '').replace('_end', '');
-        var $start = $(`input[name="${baseName}_start"]`);
-        var $end = $(`input[name="${baseName}_end"]`);
-        
-        // 设置结束日期的最小值为开始日期
-        if ($field.attr('name').endsWith('_start')) {
-            $end.attr('min', $field.val());
-        }
-        // 设置开始日期的最大值为结束日期
-        else if ($field.attr('name').endsWith('_end')) {
-            $start.attr('max', $field.val());
-        }
-    });
-
-    // 监听数字范围输入框变化
-    $('input[type="number"]').on('change', function() {
-        var $field = $(this);
-        var baseName = $field.attr('name').replace('_min', '').replace('_max', '');
-        var $min = $(`input[name="${baseName}_min"]`);
-        var $max = $(`input[name="${baseName}_max"]`);
-        
-        // 设置最大值输入框的最小值
-        if ($field.attr('name').endsWith('_min')) {
-            $max.attr('min', $field.val());
-        }
-        // 设置最小值输入框的最大值
-        else if ($field.attr('name').endsWith('_max')) {
-            $min.attr('max', $field.val());
-        }
-    });
-});
-</script>
-{% endmacro %} 
+</div> 

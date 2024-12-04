@@ -1,60 +1,23 @@
 {% extends "admin/base.html" %}
-{% from "admin/components/form_modal.html" import form_scripts %}
+
 {% from "admin/components/data_table.html" import table_scripts %}
-{% from "admin/components/filter_panel.html" import filter_scripts %}
 
 {% block content %}
-<div class="container">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1>{{ verbose_name }}</h1>
+<div class="container-fluid">
+    <div class="row">
+        <div class="col">
+            {# 传递过滤器配置 #}
+            {% set filters = frontend_config.filterFields %}
+            {% include "admin/components/data_table.html" %}
+        </div>
     </div>
-
-    {# 引入过滤器面板，传递配置 #}
-    {% with filters=frontend_config.filterFields %}
-    {% include "admin/components/filter_panel.html" %}
-    {% endwith %}
-
-    {# 引入数据表格组件 #}
-    {% include "admin/components/data_table.html" %}
-
-    {# 引入表单弹窗组件 #}
-    {% include "admin/components/form_modal.html" %}
 </div>
 {% endblock %}
 
 {% block extra_js %}
-{# 先初始化全局配置 #}
-<script id="configData" type="application/json">
-{{ frontend_config|tojson|safe }}
+<script>
+// 初始化前端配置
+window.serverConfig = {{ frontend_config|tojson|safe }};
 </script>
-
-<script type="text/javascript">
-// 从隐藏的 script 标签中获取配置数据
-window.serverConfig = JSON.parse(document.getElementById('configData').textContent);
-console.log('Server config loaded:', window.serverConfig);
-</script>
-
-{# 引入组件脚本 #}
-{{ filter_scripts() }}
 {{ table_scripts() }}
-{{ form_scripts() }}
-
-{# 最后初始化页面操作 #}
-<script type="text/javascript">
-window.handleAction = function(action, id, rowData) {
-    console.log('Action:', action, 'ID:', id);
-    try {
-        var data = typeof rowData === 'string' ? JSON.parse(rowData) : rowData;
-        console.log('Parsed data:', data);
-        
-        if (action === 'edit') {
-            window.showFormModal('edit', data);
-        }
-    } catch (error) {
-        console.error('Error handling action:', error);
-        console.error('Raw rowData:', rowData);
-        alert('操作失败，请重试');
-    }
-};
-</script>
 {% endblock %} 

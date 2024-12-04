@@ -1,6 +1,9 @@
 from enum import Enum
-from typing import Any, Optional, Union, Callable, List, Dict
+from typing import Any, Optional, Union, Callable, List, Dict, Type
 from dataclasses import dataclass
+from tortoise import Model
+import asyncio
+from .filters import FilterType
 
 class DisplayType(Enum):
     """显示类型枚举"""
@@ -23,8 +26,8 @@ class DisplayType(Enum):
 @dataclass
 class TableField:
     """表格字段配置"""
-    name: str
-    label: Optional[str] = None
+    name: str                    # 字段名称
+    label: Optional[str] = None  # 显示标签
     display_type: Optional[DisplayType] = None
     sortable: bool = False
     searchable: bool = False
@@ -35,24 +38,91 @@ class TableField:
     is_link: bool = False
     width: Optional[Union[int, str]] = None
     formatter: Optional[Callable] = None
-    hidden: bool = False  # 是否在表格中隐藏
+    hidden: bool = False
+    
+    # 关联字段配置
+    related_model: Optional[Type[Model]] = None  # 关联的模型
+    related_key: Optional[str] = None           # 关联的外键字段
     
     def __post_init__(self):
         if self.label is None:
             self.label = self.name.replace('_', ' ').title()
             
-    def format_value(self, value: Any) -> str:
-        """格式化值用于显示
-        
-        按以下优先级处理值：
-        1. 如果设置了formatter，使用formatter处理
-        2. 直接返回原始值的字符串表示
-        """
+        # 处理关联字段名称
+        if self.related_model and self.related_key:
+            # 从字段名中解析要显示的关联字段
+            parts = self.name.split('_')
+            if len(parts) > 1:
+                self.related_field = parts[-1]  # 使用最后一部分作为关联字段名
+                self.display_name = self.name   # 保持原始名称作为显示名
+            else:
+                self.related_field = 'id'  # 默认使用 id
+                self.display_name = self.name
+        else:
+            self.display_name = self.name
+            
+    async def format_value(self, value: Any, instance: Optional[Model] = None) -> str:
+        """格式化值用于显示"""
         if value is None:
             return ''
+            
+        # 如果是关联字段
+        if self.related_model and self.related_key and instance:
+            try:
+                # 获取外键值
+                fk_value = getattr(instance, self.related_key)
+                if not fk_value:
+                    return ''
+                    
+                # 查询关联对象
+                related_obj = await self.related_model.get(id=fk_value)
+                if related_obj:
+                    # 获取关联字段的值
+                    related_value = getattr(related_obj, self.related_field)
+                    return str(related_value) if related_value is not None else ''
+                return ''
+            except Exception as e:
+                print(f"Error getting related value: {str(e)}")
+                return ''
+                
+        # 使用自定义格式化函数
         if self.formatter:
-            return self.formatter(value)
+            try:
+                if asyncio.iscoroutinefunction(self.formatter):
+                    return await self.formatter(value)
+                return self.formatter(value)
+            except Exception as e:
+                print(f"Error formatting value: {str(e)}")
+                return str(value)
+                
         return str(value)
+    
+    def to_dict(self) -> dict:
+        """转换为字典，用于JSON序列化"""
+        data = {
+            'name': self.display_name,
+            'label': self.label,
+            'display_type': self.display_type.value if self.display_type else 'text',
+            'sortable': self.sortable,
+            'searchable': self.searchable,
+            'filterable': self.filterable,
+            'editable': self.editable,
+            'readonly': self.readonly,
+            'visible': self.visible,
+            'is_link': self.is_link,
+            'width': self.width,
+            'hidden': self.hidden,
+            'has_formatter': bool(self.formatter)
+        }
+        
+        if self.related_model and self.related_key:
+            data.update({
+                'related_model': self.related_model.__name__,
+                'related_key': self.related_key,
+                'related_field': self.related_field
+            })
+            
+        return data
     
 @dataclass
 class FormField:
@@ -111,8 +181,12 @@ class SearchField:
     """搜索字段配置"""
     name: str
     label: Optional[str] = None
-    placeholder: str = ""  # 修改为空字符串默认值
+    placeholder: str = ""
     operator: str = 'icontains'  # 搜索操作符
+    
+    # 添加关联字段支持
+    related_model: Optional[Type[Model]] = None  # 关联的模型
+    related_field: Optional[str] = None         # 要搜索的关联模型字段
     
     def __post_init__(self):
         if self.label is None:
@@ -122,25 +196,109 @@ class SearchField:
             
     def to_dict(self) -> dict:
         """转换为字典，用于JSON序列化"""
-        return {
+        data = {
             'name': self.name,
             'label': self.label,
             'placeholder': self.placeholder,
             'operator': self.operator
         }
+        
+        if self.related_model and self.related_field:
+            data.update({
+                'related_model': self.related_model.__name__,
+                'related_field': self.related_field
+            })
+            
+        return data
+
+    async def build_search_query(self, search_value: str) -> dict:
+        """构建搜索查询条件"""
+        if not search_value:
+            return {}
+            
+        if self.related_model and self.related_field:
+            # 先查询关联模型
+            try:
+                related_objects = await self.related_model.filter(
+                    **{f"{self.related_field}__{self.operator}": search_value}
+                )
+                if not related_objects:
+                    return {"id": None}  # 确保没有匹配结果
+                    
+                # 获取所有匹配的ID
+                related_ids = [str(obj.id) for obj in related_objects]
+                return {f"{self.name}__in": related_ids}
+                
+            except Exception as e:
+                print(f"Error in related search: {str(e)}")
+                return {"id": None}
+        else:
+            # 直接搜索当前字段
+            return {f"{self.name}__{self.operator}": search_value}
     
 @dataclass
 class FilterField:
     """过滤字段配置"""
     name: str
     label: Optional[str] = None
+    filter_type: FilterType = FilterType.INPUT  # 添加默认过滤器类型
     choices: Optional[Dict[Any, str]] = None
     multiple: bool = False
     placeholder: Optional[str] = None
+    operator: str = 'icontains'  # 添加操作符
+    
+    # 添加关联字段支持
+    related_model: Optional[Type[Model]] = None  # 关联的模型
+    related_field: Optional[str] = None         # 要过滤的关联模型字段
     
     def __post_init__(self):
         if self.label is None:
             self.label = self.name.replace('_', ' ').title()
+            
+    def to_dict(self) -> dict:
+        """转换为字典，用于JSON序列化"""
+        data = {
+            'name': self.name,
+            'label': self.label,
+            'type': self.filter_type.value,
+            'choices': self.choices,
+            'placeholder': self.placeholder,
+            'multiple': self.multiple,
+            'operator': self.operator
+        }
+        
+        if self.related_model and self.related_field:
+            data.update({
+                'related_model': self.related_model.__name__,
+                'related_field': self.related_field
+            })
+            
+        return data
+
+    async def build_filter_query(self, filter_value: str) -> dict:
+        """构建过滤查询条件"""
+        if not filter_value:
+            return {}
+            
+        if self.related_model and self.related_field:
+            # 先查询关联模型
+            try:
+                related_objects = await self.related_model.filter(
+                    **{f"{self.related_field}__{self.operator}": filter_value}
+                )
+                if not related_objects:
+                    return {"id": None}  # 确保没有匹配结果
+                    
+                # 获取所有匹配的ID
+                related_ids = [str(obj.id) for obj in related_objects]
+                return {f"{self.name}__in": related_ids}
+                
+            except Exception as e:
+                print(f"Error in related filter: {str(e)}")
+                return {"id": None}
+        else:
+            # 直接过滤当前字段
+            return {f"{self.name}__{self.operator}": filter_value}
     
 @dataclass
 class Action:
