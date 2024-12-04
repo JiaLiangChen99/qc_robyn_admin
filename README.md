@@ -15,4 +15,4 @@ A simple yet powerful admin interface for Robyn framework.
 - [x] add language support
 - [ ] optimize UI
 - [ ] support edit of image upload
-- [ ] add support for related tables
+- [x] add support for related tables

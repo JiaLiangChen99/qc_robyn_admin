@@ -177,32 +177,18 @@
             // 创建 FormData 对象
             const formData = new FormData(form);
             
-            // 获取字段配置
-            const fields = currentAction === 'add' ? config.addFormFields : config.formFields;
-            
-            // 处理文件上传字段
-            fields.forEach(field => {
-                if (field.field_type === 'picture_upload') {
-                    // 使用隐藏字段中的 URL 替换文件输入框的值
-                    const urlInput = document.getElementById(`${field.name}_url`);
-                    if (urlInput && urlInput.value) {
-                        formData.set(field.name, urlInput.value);
-                    } else {
-                        formData.delete(field.name);  // 如果没有上传文件，删除该字段
-                    }
-                }
-            });
-            
-            // 构建请求 URL
-            const url = currentAction === 'add' 
-                ? `/admin/${config.modelName}/add`
-                : `/admin/${config.modelName}/${currentId}/edit`;
-            
             // 将 FormData 转换为 URLSearchParams
             const params = new URLSearchParams();
             for (let [key, value] of formData.entries()) {
                 params.append(key, value);
             }
+            
+            // 构建请求 URL，确保编辑时包含正确的 ID
+            const url = currentAction === 'add' 
+                ? `/admin/${config.modelName}/add`
+                : `/admin/${config.modelName}/${currentId}/edit`;
+            
+            console.log('Submitting form to:', url);
             
             // 发送请求
             const response = await fetch(url, {

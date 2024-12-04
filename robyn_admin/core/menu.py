@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 @dataclass
 class MenuItem:
@@ -18,23 +18,6 @@ class MenuManager:
         """注册菜单项"""
         self.menus[menu_item.name] = menu_item
         
-    def get_menu_tree(self) -> Dict[str, Dict]:
+    def get_menu_tree(self) -> Dict[str, MenuItem]:
         """获取菜单树结构"""
-        menu_tree = {}
-        # 先添加父菜单
-        for menu in sorted(self.menus.values(), key=lambda x: x.order):
-            if not menu.parent:
-                menu_tree[menu.name] = {
-                    'item': menu,
-                    'children': {}
-                }
-                
-        # 再添加子菜单
-        for menu in self.menus.values():
-            if menu.parent and menu.parent in menu_tree:
-                menu_tree[menu.parent]['children'][menu.name] = {
-                    'item': menu,
-                    'children': {}
-                }
-                
-        return menu_tree 
+        return self.menus 

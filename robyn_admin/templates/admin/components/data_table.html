@@ -159,28 +159,36 @@ $(document).ready(function() {
         }
     });
 
-    // 如果启用编辑功能，添加操作列
-    if (config.enableEdit) {
-        columns.push({
-            field: 'operate',
-            title: '操作',  // 使用固定文本
-            width: 100,
-            formatter: function(value, row) {
-                try {
-                    const safeData = Object.assign({}, row.data);
-                    delete safeData.display;
-                    const encodedData = encodeURIComponent(JSON.stringify(safeData));
-                    return `<button class="btn btn-sm btn-warning" 
-                            onclick="handleAction('edit', '${safeData.id}', decodeURIComponent('${encodedData}'))">
-                            <i class="bi bi-pencil"></i> 编辑
-                            </button>`;
-                } catch (error) {
-                    console.error('Error formatting edit button:', error, row);
-                    return '<button class="btn btn-sm btn-warning" disabled>编辑</button>';
-                }
+    // 修改操作列的配置
+    columns.push({
+        field: 'operate',
+        title: '操作',
+        width: 100,
+        formatter: function(value, row) {
+            try {
+                // 确保从 row.data 中获取 id
+                const rowData = row.data || row;
+                const id = rowData.id;
+                
+                // 创建一个不包含敏感数据的对象副本
+                const safeData = Object.assign({}, rowData);
+                delete safeData.display;
+                
+                // 将数据转换为 URL 安全的字符串
+                const encodedData = encodeURIComponent(JSON.stringify(safeData));
+                
+                return `
+                    <button class="btn btn-sm btn-warning" 
+                            onclick="handleAction('edit', '${id}', '${encodedData}')">
+                        <i class="bi bi-pencil"></i> 编辑
+                    </button>
+                `;
+            } catch (error) {
+                console.error('Error formatting operation buttons:', error, row);
+                return '<button class="btn btn-sm btn-warning" disabled>编辑</button>';
             }
-        });
-    }
+        }
+    });
 
     // 添加更多调试日志
     console.log('Initializing table with URL:', `/admin/${config.modelName}/data`);

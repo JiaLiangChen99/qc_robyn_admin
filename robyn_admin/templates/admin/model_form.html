@@ -19,8 +19,8 @@
                 </div>
                 {% endfor %}
                 
-                <button type="submit" class="btn btn-primary">保存</button>
-                <a href="/admin/{{ model_name.lower() }}" class="btn btn-secondary">返回</a>
+                <button type="submit" class="btn btn-primary">{{ get_text('save', language) }}</button>
+                <a href="/admin/{{ model_name.lower() }}" class="btn btn-secondary">{{ get_text('back', language) }}</a>
             </form>
         </div>
     </div>

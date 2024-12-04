@@ -24,6 +24,7 @@ from .filters import (
     NumberRangeFilter, BooleanFilter, FilterType
 )
 from ..i18n.translations import get_text
+from .menu import MenuManager  # 确保导入 MenuManager
 
 @dataclass
 class MenuItem:
@@ -489,7 +490,7 @@ class AdminSite:
         self.name = name
         self.models: Dict[str, ModelAdmin] = {}
         self.default_language = default_language
-        self.menus: Dict[str, MenuItem] = {}  # 添加菜单配置字典
+        self.menu_manager = MenuManager()  # 使用 MenuManager 来管理菜单
         
         # 设置模板
         self._setup_templates()
@@ -575,13 +576,13 @@ class AdminSite:
         async def admin_index(request: Request):
             user = await self._get_current_user(request)
             if not user:
-                return Response(status_code=307, headers={"Location": f"/{self.name}/login"})
+                return Response(status_code=307, headers={"Location": f"/{self.name}/login"}, description="user not login")
             
             language = await self._get_language(request)  # 获取语言设置
             context = {
                 "site_title": get_text("admin_title", language),
                 "models": self.models,
-                "menus": self.menus,  # 添加menus到上下文
+                "menus": self.menu_manager.get_menu_tree(),  # 添加menus到上下文
                 "user": user,
                 "language": language  # 传递语言参数
             }
@@ -682,7 +683,7 @@ class AdminSite:
                     headers={"Content-Type": "application/json"}
                 )
             
-            # 获取索参数， 同时还要进行url解码
+            # 获取索参数， 同时还要进url解码
             search_values = {
                 field.name: unquote(request.query_params.get(f"search_{field.name}"))
                 for field in model_admin.search_fields
@@ -755,7 +756,7 @@ class AdminSite:
                 context = {
                     "site_title": get_text("admin_title", language),
                     "models": self.models,
-                    "menus": self.menus,
+                    "menus": self.menu_manager.get_menu_tree(),
                     "user": user,
                     "language": language,
                     "current_model": model_name,
@@ -780,7 +781,6 @@ class AdminSite:
         async def model_add_post(request: Request):
             """处理添加记录"""
             model_name: str = request.path_params.get("model_name")
-            print(model_name)
             user = await self._get_current_user(request)
             if not user:
                 return Response(status_code=303, headers={"Location": f"/{self.name}/login"})
@@ -794,7 +794,7 @@ class AdminSite:
             params = parse_qs(data)
             form_data = {key: value[0] for key, value in params.items()}
             
-            # 处理表数
+            # 处理表单数据
             processed_data = {}
             for field in model_admin.add_form_fields:
                 if field.name in form_data:
@@ -808,6 +808,10 @@ class AdminSite:
                     headers={"Location": f"/{self.name}/{model_name.lower()}"}
                 )
             except Exception as e:
+                # 获取当前语言设置
+                language = await self._get_language(request)
+                
+                # 构建完整的上下文
                 context = {
                     "models": self.models,
                     "model_name": model_name,
@@ -815,7 +819,10 @@ class AdminSite:
                     "user": user,
                     "action": "add",
                     "error": str(e),
-                    "form_data": form_data
+                    "form_data": form_data,
+                    "menus": self.menu_manager.get_menu_tree(),  # 添加菜单数据
+                    "language": language,  # 添加语言设置
+                    "site_title": get_text("admin_title", language)  # 添加站点标题
                 }
                 return self.jinja_template.render_template("admin/model_form.html", **context)
 
@@ -824,7 +831,7 @@ class AdminSite:
             """处理编辑记录"""
             model_name: str = request.path_params.get("model_name")
             object_id: str = request.path_params.get("id")
-            
+            print("编辑的表单数据", object_id)
             user = await self._get_current_user(request)
             if not user:
                 return Response(status_code=303, headers={"Location": f"/{self.name}/login"})
@@ -1190,4 +1197,5 @@ class AdminSite:
             return self.default_language
         
     def register_menu(self, menu_item: MenuItem):
-        """注菜单项"""
+        """注册菜单项"""
+        self.menu_manager.register_menu(menu_item)  # 使用 menu_manager 注册菜单

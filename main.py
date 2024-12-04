@@ -1,6 +1,6 @@
 from robyn import Robyn
 from robyn_admin.core.admin import AdminSite, ModelAdmin
-from models import register_tortoise, Users
+from models import register_tortoise, Users, Orders, OrderDetails, Products
 from robyn_admin.models import AdminUser
 from robyn_admin.core.fields import (
     DisplayType, TableField, FormField, SearchField, 
@@ -28,7 +28,7 @@ class UsersAdmin(ModelAdmin):
             label="ID", 
             display_type=DisplayType.TEXT,
             editable=False,
-            hidden=True
+            hidden=False
         ),
         TableField(
             "username", 
@@ -129,6 +129,39 @@ class UsersAdmin(ModelAdmin):
             label="创建时间"
         )
     ]
+
+class OrderDetailAdmin(ModelAdmin):
+    verbose_name = "用户订单管理"
+    menu_group = "用户管理"
+    menu_icon = "bi bi-cart"
+    menu_order = 2
+
+    table_fields = [
+        TableField(
+            "id", label="订单id", display_type=DisplayType.TEXT, editable=False, hidden=True
+        ),
+        TableField(
+            "Orders_order_no", label="订单号", 
+            display_type=DisplayType.TEXT, 
+            related_model=Orders,
+            related_key="order_id",
+            formatter=lambda x: str(x)
+        ),
+        TableField(
+            "price", label="价钱", display_type=DisplayType.TEXT, formatter=lambda x: str(x)
+        ),
+        TableField(
+            name="Products_name",
+            label="产品名",
+            related_model=Products,
+            related_key="product_id",   
+        ),
+    ]
+    search_fields = []
+    
+    default_ordering = ["-created_at"]
+    enable_edit = False
+
 
 class AdminUserAdmin(ModelAdmin):
     verbose_name = "管理员"
@@ -271,10 +304,10 @@ class AdminUserAdmin(ModelAdmin):
     default_ordering = ["-created_at"]
     
     # 开启编辑
-    enable_edit = True
+    # enable_edit = True
 
-    add_form_title = "添加管理员"
-    edit_form_title = "编辑管理员信息"
+    # add_form_title = "添加管理员"
+    # edit_form_title = "编辑管理员信息"
 
 # 配置数据库
 DB_CONFIG = {
@@ -327,7 +360,7 @@ admin_site.register_menu(MenuItem(
 # 注册模型
 admin_site.register_model(AdminUser, AdminUserAdmin)
 admin_site.register_model(Users, UsersAdmin)
-
+admin_site.register_model(OrderDetails, OrderDetailAdmin)
 
 if __name__ == "__main__":
     app.start(host="127.0.0.1", port=8100)
