@@ -1,0 +1,140 @@
+{# 内联数据模态框组件 #}
+<div class="modal fade" id="inlineModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <button class="btn btn-primary add-inline-record">
+                        <i class="bi bi-plus-lg"></i> 添加记录
+                    </button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table" id="inlineTable"></table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% macro inline_modal_scripts() %}
+<script>
+(function() {
+    let inlineModal = null;
+    let currentOptions = null;
+
+    // 初始化模态框
+    document.addEventListener('DOMContentLoaded', function() {
+        inlineModal = new bootstrap.Modal(document.getElementById('inlineModal'));
+    });
+
+    // 显示内联数据模态框
+    window.showInlineModal = function(options) {
+        if (!inlineModal) {
+            inlineModal = new bootstrap.Modal(document.getElementById('inlineModal'));
+        }
+
+        currentOptions = options;
+        
+        // 设置标题
+        document.querySelector('#inlineModal .modal-title').textContent = options.title;
+        
+        // 初始化表格
+        const $table = $('#inlineTable');
+        
+        // 构建列配置
+        const columns = options.config.fields.map(field => ({
+            field: field.name,
+            title: field.label,
+            formatter: function(value, row) {
+                return row.display[field.name] || row.data[field.name] || '';
+            }
+        }));
+        
+        // 添加操作列
+        columns.push({
+            field: 'operate',
+            title: '操作',
+            width: 150,
+            formatter: function(value, row) {
+                return `
+                    <button class="btn btn-sm btn-warning" onclick="editInlineRecord('${options.model}', '${row.data.id}')">
+                        <i class="bi bi-pencil"></i> 编辑
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteInlineRecord('${options.model}', '${row.data.id}')">
+                        <i class="bi bi-trash"></i> 删除
+                    </button>
+                `;
+            }
+        });
+
+        // 初始化 Bootstrap Table
+        $table.bootstrapTable({
+            columns: columns,
+            data: options.data,
+            pagination: true,
+            search: true,
+            pageSize: 10,
+            pageList: [10, 25, 50, 100],
+            showColumns: true,
+            showRefresh: true
+        });
+
+        // 显示模态框
+        inlineModal.show();
+    };
+
+    // 添加记录
+    window.addInlineRecord = function(model, parentId) {
+        const fkField = currentOptions.config.fk_field;
+        const initialData = { [fkField]: parentId };
+        showFormModal('add', initialData);
+    };
+
+    // 编辑记录
+    window.editInlineRecord = function(model, id) {
+        fetch(`/admin/${model}/${id}`)
+            .then(response => response.json())
+            .then(data => {
+                showFormModal('edit', data);
+            })
+            .catch(error => {
+                console.error('Error loading record:', error);
+                alert('加载数据失败');
+            });
+    };
+
+    // 删除记录
+    window.deleteInlineRecord = function(model, id) {
+        if (confirm('确定要删除这条记录吗？')) {
+            fetch(`/admin/${model}/${id}/delete`, {
+                method: 'POST'
+            })
+            .then(response => {
+                if (response.ok) {
+                    // 刷新表格
+                    $('#inlineTable').bootstrapTable('refresh');
+                } else {
+                    alert('删除失败');
+                }
+            })
+            .catch(error => {
+                console.error('Delete error:', error);
+                alert('删除失败');
+            });
+        }
+    };
+
+    // 监听表单提交成功事件
+    document.addEventListener('formSubmitSuccess', function() {
+        // 刷新内联表格
+        if (inlineModal && inlineModal._element.classList.contains('show')) {
+            $('#inlineTable').bootstrapTable('refresh');
+        }
+    });
+})();
+</script>
+{% endmacro %} 

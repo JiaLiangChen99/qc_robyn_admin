@@ -30,38 +30,69 @@ var translations = {
     export: "{{ get_text('export', language) }}",
     search: "{{ get_text('search', language) }}",
     reset: "{{ get_text('reset', language) }}",
-    all: "{{ get_text('all', language) }}"
+    all: "{{ get_text('all', language) }}",
+    operation: "{{ get_text('operation', language) }}",
+    edit: "{{ get_text('edit', language) }}",
+    row_delete: "{{ get_text('row_delete', language) }}",
 };
 
 function renderToolbar() {
     var $toolbar = $('#toolbar');
-    $toolbar.empty().append(`
-        <button class="btn btn-primary" onclick="showFormModal('add')">
-            <i class="bi bi-plus-lg"></i> ${translations.add}
-        </button>
-        <button id="batchDelete" class="btn btn-danger" disabled>
-            <i class="bi bi-trash"></i> ${translations.batch_delete}
-        </button>
-        <div class="btn-group">
-            <button id="exportBtn" class="btn btn-success">
-                <i class="bi bi-download"></i> ${translations.export}
+    var config = window.serverConfig;
+    console.log('Rendering toolbar with full config:', config);
+    console.log('Allow add:', config.allowAdd);
+    console.log('Allow delete:', config.allowDelete);
+    console.log('Allow export:', config.allowExport);
+    
+    var buttons = [];
+    
+    // 添加按钮
+    if (config.allowAdd) {
+        console.log('Adding add button');
+        buttons.push(`
+            <button class="btn btn-primary" onclick="showFormModal('add')">
+                <i class="bi bi-plus-lg"></i> ${translations.add}
             </button>
-            <button type="button" class="btn btn-success dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown">
-                <span class="visually-hidden">Toggle Dropdown</span>
+        `);
+    }
+    
+    // 批量删除按钮
+    if (config.allowDelete) {
+        console.log('Adding delete button');
+        buttons.push(`
+            <button id="batchDelete" class="btn btn-danger" disabled>
+                <i class="bi bi-trash"></i> ${translations.batch_delete}
             </button>
-            <ul class="dropdown-menu">
-                <li><a class="dropdown-item" href="#" onclick="exportData('all')">
-                    ${translations.export_current}
-                </a></li>
-                <li><a class="dropdown-item" href="#" onclick="exportData('selected')">
-                    ${translations.export_selected}
-                </a></li>
-            </ul>
-        </div>
-    `);
+        `);
+    }
+    
+    // 导出按钮
+    if (config.allowExport) {
+        buttons.push(`
+            <div class="btn-group">
+                <button id="exportBtn" class="btn btn-success">
+                    <i class="bi bi-download"></i> ${translations.export}
+                </button>
+                <button type="button" class="btn btn-success dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown">
+                    <span class="visually-hidden">Toggle Dropdown</span>
+                </button>
+                <ul class="dropdown-menu">
+                    <li><a class="dropdown-item" href="#" onclick="exportData('all')">
+                        ${translations.export_current}
+                    </a></li>
+                    <li><a class="dropdown-item" href="#" onclick="exportData('selected')">
+                        ${translations.export_selected}
+                    </a></li>
+                </ul>
+            </div>
+        `);
+    }
+    
+    // 渲染按钮
+    $toolbar.empty().append(buttons.join(''));
 }
 
-// 初始化过滤器功能
+// 初始化滤器功能
 function initializeFilter($table) {
     // 处理过滤表单提交
     $('#filterForm').on('submit', function(e) {
@@ -126,7 +157,6 @@ function initializeFilter($table) {
 }
 
 $(document).ready(function() {
-    renderToolbar();
     if (!window.serverConfig) {
         console.error('serverConfig not initialized');
         return;
@@ -134,6 +164,10 @@ $(document).ready(function() {
 
     var config = window.serverConfig;
     console.log('Table config:', config);
+    
+    // 确保在获取到配置后再渲染工具栏
+    renderToolbar();
+
     var $table = $('#dataTable');
     
     // 构建表格列配置
@@ -144,6 +178,17 @@ $(document).ready(function() {
                 field: field.name,
                 title: field.label,
                 formatter: function(value, row) {
+                    if (field.actions && field.actions.length > 0) {
+                        // 生成自定义操作按钮
+                        return field.actions.map(action => `
+                            <button class="btn btn-sm ${action.btn_class}"
+                                    onclick="handleCustomAction('${action.name}', '${row.id}', '${action.inline_model}')">
+                                ${action.icon ? `<i class="${action.icon}"></i> ` : ''}
+                                ${action.label}
+                            </button>
+                        `).join(' ');
+                    }
+                    
                     if (row.display && row.display[field.name] !== undefined) {
                         return row.display[field.name];
                     }
@@ -159,38 +204,68 @@ $(document).ready(function() {
         }
     });
 
-    // 修改操作列的配置
-    columns.push({
-        field: 'operate',
-        title: '操作',
-        width: 100,
-        formatter: function(value, row) {
-            try {
-                // 确保从 row.data 中获取 id
-                const rowData = row.data || row;
-                const id = rowData.id;
-                
-                // 创建一个不包含敏感数据的对象副本
-                const safeData = Object.assign({}, rowData);
-                delete safeData.display;
-                
-                // 将数据转换为 URL 安全的字符串
-                const encodedData = encodeURIComponent(JSON.stringify(safeData));
-                
-                return `
-                    <button class="btn btn-sm btn-warning" 
-                            onclick="handleAction('edit', '${id}', '${encodedData}')">
-                        <i class="bi bi-pencil"></i> 编辑
-                    </button>
-                `;
-            } catch (error) {
-                console.error('Error formatting operation buttons:', error, row);
-                return '<button class="btn btn-sm btn-warning" disabled>编辑</button>';
-            }
-        }
-    });
+    // 只有在 enableEdit 或 allowDelete 为 true 时才添加操作列
+    if (config.enableEdit || config.allowDelete || config.inlines) {  // 添加 config.inlines 条件
+        columns.push({
+            field: 'operate',
+            title: translations.operation,
+            width: 150,  // 增加宽度以适应更多按钮
+            formatter: function(value, row) {
+                try {
+                    // 确保从 row.data 中获取 id
+                    const rowData = row.data || row;
+                    const id = rowData.id;
+                    
+                    // 创建一个不包含敏感数据的对象副本
+                    const safeData = Object.assign({}, rowData);
+                    delete safeData.display;
+                    
+                    // 将数据转换为 URL 安全的字符串
+                    const encodedData = encodeURIComponent(JSON.stringify(safeData));
+                    
+                    let buttons = [];
+                    
+                    // 编辑按钮
+                    if (config.enableEdit) {
+                        buttons.push(`
+                            <button class="btn btn-sm btn-warning" 
+                                    onclick="handleAction('edit', '${id}', '${encodedData}')">
+                                <i class="bi bi-pencil"></i> ${translations.edit}
+                            </button>
+                        `);
+                    }
+                    
+                    // 删除按钮
+                    if (config.allowDelete) {
+                        buttons.push(`
+                            <button class="btn btn-sm btn-danger" 
+                                    onclick="handleAction('delete', '${id}')">
+                                <i class="bi bi-trash"></i> ${translations.row_delete}
+                            </button>
+                        `);
+                    }
 
-    // 添加更多调试日志
+                    // 内联数据按钮
+                    if (config.inlines && config.inlines.length > 0) {
+                        const inline = config.inlines[0];  // 获取第一个内联配置
+                        buttons.push(`
+                            <button class="btn btn-sm btn-info" 
+                                    onclick="handleCustomAction('view_documents', '${id}', '${inline.model}')">
+                                <i class="bi bi-file-text"></i> 状态详情
+                            </button>
+                        `);
+                    }
+                    
+                    return buttons.join(' ');
+                } catch (error) {
+                    console.error('Error formatting operation buttons:', error, row);
+                    return '<button class="btn btn-sm btn-warning" disabled>${translations.edit}</button>';
+                }
+            }
+        });
+    }
+
+    // 添加更调试日志
     console.log('Initializing table with URL:', `/admin/${config.modelName}/data`);
     console.log('Table columns:', columns);
 
@@ -340,7 +415,7 @@ $(document).ready(function() {
             url: `/admin/${config.modelName}/batch_delete`,
             method: 'POST',
             data: { ids: ids },
-            dataType: 'json',  // 指定应类型为 JSON
+            dataType: 'json',  // 指定应类型 JSON
             success: function(response) {
                 if (response.success) {
                     // 显示成功提示
@@ -442,7 +517,7 @@ $(document).ready(function() {
         data.forEach(function(row) {
             csvContent += visibleColumns.map(function(column) {
                 var value;
-                // 获取显示值
+                // 取显示值
                 var cell = $table.find('tr[data-index="' + $table.bootstrapTable('getData').indexOf(row) + '"] td[data-field="' + column.field + '"]');
                 if (cell.length) {
                     value = cell.text().trim();
@@ -489,6 +564,158 @@ $(document).ready(function() {
         var message = translations.export_current;
         alert(message);
     });
+
+    // 添加自定义操作处理函数
+    window.handleCustomAction = async function(action, id, inlineModel) {
+        if (action === 'view_documents') {
+            try {
+                const response = await fetch(`/admin/${config.modelName}/inline_data?parent_id=${id}&inline_model=${inlineModel}`);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText);
+                }
+                
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error || '加载数据失败');
+                }
+                
+                // 获取内联配置
+                const inlineConfig = window.serverConfig.inlines.find(i => i.model === inlineModel);
+                if (!inlineConfig) {
+                    throw new Error('内联配置未找到');
+                }
+                
+                // 显示关联数据弹窗
+                showInlineModal({
+                    title: inlineConfig.title,
+                    model: inlineModel,
+                    parentId: id,
+                    data: result.data,
+                    config: inlineConfig
+                });
+            } catch (error) {
+                console.error('Error loading inline data:', error);
+                alert('加载数据失败: ' + (error.message || '未知错误'));
+            }
+        }
+    };
+
+    // 添加关联数据弹窗
+    function showInlineModal(options) {
+        console.log('Showing inline modal with options:', options);
+        console.log('Fields config:', options.config.fields);
+        const modalHtml = `
+            <div class="modal fade" id="inlineModal" tabindex="-1">
+                <div class="modal-dialog modal-xl" style="max-width: 90%; width: 1200px;">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">${options.title}</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="table-responsive">
+                                <div class="mb-3">
+                                    <button class="btn btn-primary" onclick="addInlineRecord('${options.model}', '${options.parentId}')">
+                                        <i class="bi bi-plus-lg"></i> 添加记录
+                                    </button>
+                                </div>
+                                <table class="table table-striped table-hover">
+                                    <thead>
+                                        <tr>
+                                            ${options.config.fields.map(f => `<th>${f.label}</th>`).join('')}
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${generateInlineTableRows(options)}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // 移除已存在的模态框
+        const existingModal = document.getElementById('inlineModal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+        
+        // 添加新模态框
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        
+        // 显示模态框
+        const modal = new bootstrap.Modal(document.getElementById('inlineModal'));
+        modal.show();
+    }
+
+    // 生成关联数据表格行
+    function generateInlineTableRows(options) {
+        return options.data.map(item => `
+            <tr>
+                ${options.config.fields.map(field => {
+                    const value = item.display[field.name] || item.data[field.name] || '';
+                    // 处理链接类型字段
+                    if (field.display_type === 'link') {
+                        return `<td><a href="${value}" target="_blank">${value}</a></td>`;
+                    }
+                    return `<td>${value}</td>`;
+                }).join('')}
+                <td>
+                    <button class="btn btn-sm btn-warning" onclick="editInlineRecord('${options.model}', '${item.data.id}')">
+                        <i class="bi bi-pencil"></i> 编辑
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteInlineRecord('${options.model}', '${item.data.id}')">
+                        <i class="bi bi-trash"></i> 删除
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    // 添加关联记录
+    window.addInlineRecord = function(model, parentId) {
+        showFormModal('add', { [window.serverConfig.inlines[0].fk_field]: parentId });
+    };
+
+    // 编辑关联记录
+    window.editInlineRecord = function(model, id) {
+        // 获取记录数据并显编辑表单
+        fetch(`/admin/${model}/${id}`)
+            .then(response => response.json())
+            .then(data => {
+                showFormModal('edit', data);
+            })
+            .catch(error => {
+                console.error('Error loading record:', error);
+                alert('加载数据失败');
+            });
+    };
+
+    // 删除关联记录
+    window.deleteInlineRecord = function(model, id) {
+        if (confirm('确定要删除这条记录吗？')) {
+            fetch(`/admin/${model}/${id}/delete`, {
+                method: 'POST'
+            })
+            .then(response => {
+                if (response.ok) {
+                    // 刷新表格
+                    document.getElementById('inlineModal').querySelector('tbody').innerHTML = 
+                        generateInlineTableRows(currentInlineOptions);
+                } else {
+                    alert('删除失败');
+                }
+            })
+            .catch(error => {
+                console.error('Delete error:', error);
+                alert('删除失败');
+            });
+        }
+    };
 });
 
 // 修改语言切换函数

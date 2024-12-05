@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from tortoise import Model
 import asyncio
 from .filters import FilterType
+from tortoise.expressions import Q
+from functools import reduce
+import operator
 
 class DisplayType(Enum):
     """显示类型枚举"""
@@ -23,6 +26,15 @@ class DisplayType(Enum):
     EMAIL = 'email'
     SELECT = 'select'
     
+@dataclass
+class TableAction:
+    """表格操作按钮配置"""
+    name: str                # 按钮名称
+    label: str              # 显示文本
+    icon: str = ""          # 图标类名
+    btn_class: str = "btn-primary"  # 按钮样式
+    inline_model: Optional[str] = None  # 关联的内联模型名称
+
 @dataclass
 class TableField:
     """表格字段配置"""
@@ -44,6 +56,8 @@ class TableField:
     related_model: Optional[Type[Model]] = None  # 关联的模型
     related_key: Optional[str] = None           # 关联的外键字段
     
+    actions: List[TableAction] = None  # 添加自定义操作按钮配置
+    
     def __post_init__(self):
         if self.label is None:
             self.label = self.name.replace('_', ' ').title()
@@ -60,6 +74,9 @@ class TableField:
                 self.display_name = self.name
         else:
             self.display_name = self.name
+            
+        if self.actions is None:
+            self.actions = []
             
     async def format_value(self, value: Any, instance: Optional[Model] = None) -> str:
         """格式化值用于显示"""
@@ -151,7 +168,7 @@ class FormField:
         self.validators = self.validators or []
     
     def process_value(self, value: Any) -> Any:
-        """处理字段值"""
+        """处理字值"""
         if self.processor:
             return self.processor(value)
         return value
@@ -179,14 +196,14 @@ class FormField:
 @dataclass
 class SearchField:
     """搜索字段配置"""
-    name: str
+    name: str                    # 字段名称，格式应该是 "模型类_字段名"
     label: Optional[str] = None
     placeholder: str = ""
-    operator: str = 'icontains'  # 搜索操作符
+    operator: str = 'icontains'
     
-    # 添加关联字段支持
+    # 保持与 TableField 一致的关联字段支持
     related_model: Optional[Type[Model]] = None  # 关联的模型
-    related_field: Optional[str] = None         # 要搜索的关联模型字段
+    related_key: Optional[str] = None           # 外键字段名
     
     def __post_init__(self):
         if self.label is None:
@@ -203,10 +220,9 @@ class SearchField:
             'operator': self.operator
         }
         
-        if self.related_model and self.related_field:
+        if self.related_model:
             data.update({
                 'related_model': self.related_model.__name__,
-                'related_field': self.related_field
             })
             
         return data
@@ -216,125 +232,35 @@ class SearchField:
         if not search_value:
             return {}
             
-        if self.related_model and self.related_field:
-            # 先查询关联模型
-            try:
-                related_objects = await self.related_model.filter(
-                    **{f"{self.related_field}__{self.operator}": search_value}
-                )
-                if not related_objects:
-                    return {"id": None}  # 确保没有匹配结果
+        if self.related_model and self.related_key:
+            # 从字段名中解析要搜索的关联字段
+            model_name = self.related_model.__name__
+            if self.name.startswith(model_name + '_'):
+                # 获取实际要搜索的字段名
+                related_field = self.name[len(model_name + '_'):]
+                try:
+                    # 先查询关联模型
+                    related_objects = await self.related_model.filter(
+                        **{f"{related_field}__icontains": search_value}
+                    )
+                    if not related_objects:
+                        return {"id": None}
+                        
+                    # 构建 OR 条件列表
+                    conditions = [
+                        Q(**{f"{self.related_key}": str(obj.id)})
+                        for obj in related_objects
+                    ]
                     
-                # 获取所有匹配的ID
-                related_ids = [str(obj.id) for obj in related_objects]
-                return {f"{self.name}__in": related_ids}
-                
-            except Exception as e:
-                print(f"Error in related search: {str(e)}")
-                return {"id": None}
-        else:
-            # 直接搜索当前字段
-            return {f"{self.name}__{self.operator}": search_value}
-    
-@dataclass
-class FilterField:
-    """过滤字段配置"""
-    name: str
-    label: Optional[str] = None
-    filter_type: FilterType = FilterType.INPUT  # 添加默认过滤器类型
-    choices: Optional[Dict[Any, str]] = None
-    multiple: bool = False
-    placeholder: Optional[str] = None
-    operator: str = 'icontains'  # 添加操作符
-    
-    # 添加关联字段支持
-    related_model: Optional[Type[Model]] = None  # 关联的模型
-    related_field: Optional[str] = None         # 要过滤的关联模型字段
-    
-    def __post_init__(self):
-        if self.label is None:
-            self.label = self.name.replace('_', ' ').title()
-            
-    def to_dict(self) -> dict:
-        """转换为字典，用于JSON序列化"""
-        data = {
-            'name': self.name,
-            'label': self.label,
-            'type': self.filter_type.value,
-            'choices': self.choices,
-            'placeholder': self.placeholder,
-            'multiple': self.multiple,
-            'operator': self.operator
-        }
-        
-        if self.related_model and self.related_field:
-            data.update({
-                'related_model': self.related_model.__name__,
-                'related_field': self.related_field
-            })
-            
-        return data
-
-    async def build_filter_query(self, filter_value: str) -> dict:
-        """构建过滤查询条件"""
-        if not filter_value:
-            return {}
-            
-        if self.related_model and self.related_field:
-            # 先查询关联模型
-            try:
-                related_objects = await self.related_model.filter(
-                    **{f"{self.related_field}__{self.operator}": filter_value}
-                )
-                if not related_objects:
-                    return {"id": None}  # 确保没有匹配结果
+                    if conditions:
+                        # 返回组合的Q对象
+                        combined_q = reduce(operator.or_, conditions)
+                        return {"_q_object": combined_q}
+                    return {"id": None}
                     
-                # 获取所有匹配的ID
-                related_ids = [str(obj.id) for obj in related_objects]
-                return {f"{self.name}__in": related_ids}
-                
-            except Exception as e:
-                print(f"Error in related filter: {str(e)}")
-                return {"id": None}
+                except Exception as e:
+                    print(f"Error in related search: {str(e)}")
+                    return {"id": None}
         else:
-            # 直接过滤当前字段
-            return {f"{self.name}__{self.operator}": filter_value}
-    
-@dataclass
-class Action:
-    """操作按钮配置"""
-    name: str
-    label: str
-    type: str = 'primary'  # 按钮类型：primary/secondary/success/danger/warning
-    icon: Optional[str] = None  # 图标类名
-    confirm: Optional[str] = None  # 确认提示文本
-    permissions: List[str] = None  # 所需权限
-    
-    def __post_init__(self):
-        self.permissions = self.permissions or []
-    
-@dataclass
-class RowAction:
-    """行操作配置"""
-    name: str  # 操作名称
-    label: str  # 显示文本
-    type: str = 'primary'  # 按钮类型：primary/secondary/success/danger/warning
-    icon: Optional[str] = None  # 图标类名
-    confirm: Optional[str] = None  # 确认提示文本
-    enabled: bool = True  # 是否启用
-    permissions: List[str] = None  # 所需权限
-    
-    def __post_init__(self):
-        self.permissions = self.permissions or []
-        
-    def to_dict(self) -> dict:
-        """转换为字典，用于JSON序列化"""
-        return {
-            'name': self.name,
-            'label': self.label,
-            'type': self.type,
-            'icon': self.icon,
-            'confirm': self.confirm,
-            'enabled': self.enabled,
-            'permissions': self.permissions
-        }
+            # 直接搜索当前字段，使用精确匹配而不是模糊匹配
+            return {f"{self.name}": search_value}

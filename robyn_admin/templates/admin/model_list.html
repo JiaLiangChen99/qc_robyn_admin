@@ -2,6 +2,7 @@
 
 {% from "admin/components/data_table.html" import table_scripts %}
 {% from "admin/components/form_modal.html" import form_scripts %}
+{% from "admin/components/inline_modal.html" import inline_modal_scripts %}
 
 {% block content %}
 <div class="container-fluid">
@@ -9,6 +10,9 @@
         <div class="col">
             {# 添加表单模态框组件 #}
             {% include "admin/components/form_modal.html" %}
+            
+            {# 添加内联数据模态框组件 #}
+            {% include "admin/components/inline_modal.html" %}
             
             {# 传递过滤器配置 #}
             {% set filters = frontend_config.filterFields %}
@@ -23,13 +27,9 @@
 <script>
 // 初始化前端配置
 (function() {
-    window.serverConfig = JSON.parse('{{ frontend_config|tojson|safe }}');
+    window.serverConfig = {{ frontend_config|tojson|safe }};
 })();
-</script>
-{{ table_scripts() }}
-{{ form_scripts() }}
 
-<script>
 // 处理表格操作
 function handleAction(action, id, rowData) {
     let row = null;
@@ -92,4 +92,7 @@ async function deleteRecord(id) {
     }
 }
 </script>
+{{ table_scripts() }}
+{{ form_scripts() }}
+{{ inline_modal_scripts() }}
 {% endblock %} 

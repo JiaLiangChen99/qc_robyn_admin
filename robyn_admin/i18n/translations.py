@@ -64,7 +64,8 @@ TRANSLATIONS = {
         'search_placeholder': '搜索...',
         'no_records_found': '没有找到匹配的记录',
         'pagination_info': '显示第 {from} 到 {to} 条记录，共 {total} 条',
-
+        'edit': '编辑',
+        'row_delete': '删除',
         # 过滤器相关
         'start_date': '开始日期',
         'end_date': '结束日期',
@@ -141,7 +142,8 @@ TRANSLATIONS = {
         'search_placeholder': 'Search...',
         'no_records_found': 'No matching records found',
         'pagination_info': 'Showing {from} to {to} of {total} entries',
-
+        'edit': 'edit',
+        'row_delete': 'delete',
         # Filter related
         'start_date': 'Start Date',
         'end_date': 'End Date',
