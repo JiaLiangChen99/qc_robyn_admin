@@ -1,7 +1,7 @@
 {# 筛选面板组件 #}
 <div class="card mb-3">
     <div class="card-body">
-        <form id="filterForm" class="row g-3">
+        <form id="filterForm" class="row g-3" onsubmit="return false;">
             {% for field in filters %}
             <div class="col-md-3">
                 <label class="form-label">{{ field.label }}</label>
@@ -32,14 +32,75 @@
             
             {% if filters %}
             <div class="col-12">
-                <button type="submit" class="btn btn-primary">
+                <button type="button" class="btn btn-primary" onclick="applyFilters()">
                     <i class="bi bi-search"></i> {{ translations.search }}
                 </button>
-                <button type="reset" class="btn btn-secondary">
+                <button type="button" class="btn btn-secondary" onclick="resetFilters()">
                     <i class="bi bi-x-circle"></i> {{ translations.reset }}
                 </button>
             </div>
             {% endif %}
         </form>
     </div>
-</div> 
+</div>
+
+<script>
+function applyFilters() {
+    console.log('Applying filters...');
+    
+    // 等待表格初始化
+    const waitForTable = setInterval(() => {
+        if (window.$table) {
+            clearInterval(waitForTable);
+            
+            // 获取所有过滤字段的值
+            const filterForm = document.getElementById('filterForm');
+            const filterFields = filterForm.getElementsByClassName('filter-field');
+            const filterParams = {};
+            
+            for (let field of filterFields) {
+                if (field.value) {
+                    filterParams[field.name] = field.value;
+                }
+            }
+            
+            console.log('Filter params:', filterParams);
+            
+            // 刷新表格数据
+            console.log('Refreshing table with params:', filterParams);
+            window.$table.bootstrapTable('refresh', {
+                query: filterParams
+            });
+        }
+    }, 100);  // 每100ms检查一次
+    
+    // 5秒后如果还没初始化就停止等待
+    setTimeout(() => {
+        clearInterval(waitForTable);
+        if (!window.$table) {
+            console.error('Table initialization timeout!');
+        }
+    }, 5000);
+}
+
+function resetFilters() {
+    // 重置表单
+    document.getElementById('filterForm').reset();
+    // 刷新表格数据（不带过滤参数）
+    if (window.$table) {
+        window.$table.bootstrapTable('refresh', {
+            query: {}
+        });
+    }
+}
+
+// 为过滤字段添加回车键触发搜索
+document.querySelectorAll('.filter-field').forEach(field => {
+    field.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            applyFilters();
+        }
+    });
+});
+</script> 

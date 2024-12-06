@@ -2,6 +2,7 @@ from typing import Type, List, Optional
 from tortoise import Model
 from .fields import TableField, FormField
 import asyncio
+from dataclasses import dataclass
 
 class InlineModelAdmin:
     """内联管理类基类"""
@@ -16,6 +17,9 @@ class InlineModelAdmin:
     table_fields: List[TableField] = []
     form_fields: List[FormField] = []
     
+    # 默认排序字段列表
+    default_ordering: List[str] = None  # 如 ['-created_at', 'name']
+    
     def __init__(self, parent_model: Type[Model]):
         if not self.model:
             raise ValueError("必须指定 model")
@@ -28,6 +32,11 @@ class InlineModelAdmin:
                 self.verbose_name = self.model.Meta.description
             else:
                 self.verbose_name = self.model.__name__
+                
+        # 初始化排序配置
+        if self.default_ordering is None:
+            self.default_ordering = []
+        self.is_inline = True  # 设置为内联模型
 
     async def get_queryset(self, parent_instance):
         """获取关联的查询集"""
@@ -39,11 +48,23 @@ class InlineModelAdmin:
         filter_kwargs = {self.fk_field: parent_instance.id}
         print(f"Querying {self.model.__name__} with filter: {filter_kwargs}")
         
-        # 返回查询集
-        return self.model.filter(**filter_kwargs)
+        # 获取基础查询集
+        queryset = self.model.filter(**filter_kwargs)
+        
+        # 应用默认排序
+        if self.default_ordering:
+            queryset = queryset.order_by(*self.default_ordering)
+            
+        return queryset
         
     def get_formset(self):
         """获取表单集配置"""
+        # 从table_fields中获取可排序字段
+        ordering_fields = [
+            field.name for field in self.table_fields 
+            if field.sortable
+        ]
+        print("关联查询表单", ordering_fields)
         return {
             'model': self.model.__name__,
             'fk_field': self.fk_field,
@@ -51,9 +72,12 @@ class InlineModelAdmin:
             'max_num': self.max_num,
             'can_delete': self.can_delete,
             'fields': [field.to_dict() for field in self.form_fields],
-            'table_fields': [field.to_dict() for field in self.table_fields],  # 添加表格字段配置
+            'table_fields': [field.to_dict() for field in self.table_fields],
             'verbose_name': self.verbose_name,
-            'title': self.verbose_name
+            'title': self.verbose_name,
+            # 添加排序配置
+            'default_ordering': self.default_ordering,
+            'ordering_fields': ordering_fields  # 使用从table_fields获取的可排序字段
         }
         
     async def serialize_object(self, obj: Model, for_display: bool = True) -> dict:

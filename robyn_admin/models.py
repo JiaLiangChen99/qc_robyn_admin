@@ -14,6 +14,13 @@ class AdminUser(models.Model):
     last_login = fields.DatetimeField(null=True)
     created_at = fields.DatetimeField(auto_now_add=True)
     
+    # 添加角色关联
+    roles = fields.ManyToManyField(
+        'models.Role', 
+        through='models.UserRole',
+        related_name='users'
+    )
+    
     @classmethod
     def hash_password(cls, password: str) -> str:
         """对密码进行哈希"""

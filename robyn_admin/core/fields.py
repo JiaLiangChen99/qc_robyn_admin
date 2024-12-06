@@ -62,6 +62,10 @@ class TableField:
         if self.label is None:
             self.label = self.name.replace('_', ' ').title()
             
+        # 如果display_type是LINK，自动设置is_link为True
+        if self.display_type == DisplayType.LINK:
+            self.is_link = True
+            
         # 处理关联字段名称
         if self.related_model and self.related_key:
             # 从字段名中解析要显示的关联字段

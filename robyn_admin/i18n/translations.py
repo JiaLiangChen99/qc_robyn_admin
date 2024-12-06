@@ -39,7 +39,7 @@ TRANSLATIONS = {
         # 提示信息
         'confirm_delete': '确定要删除吗？',
         'operation_success': '操作成功',
-        'operation_failed': '操作失败',
+        'operation_failed': '操作失���',
         'please_select': '请选择',
         'loading': '加载中...',
         'no_data': '暂无数据',
@@ -76,6 +76,12 @@ TRANSLATIONS = {
         'filter_placeholder': '请输入{field}',
         'select_placeholder': '请选择{field}',
         'list': '列表',
+
+        # 系统管理菜单
+        'system_management': '系统管理',
+        'user_management': '用户管理',
+        'role_management': '角色管理',
+        'user_role_management': '用户角色管理',
     },
     'en_US': {
         # Common
@@ -154,6 +160,12 @@ TRANSLATIONS = {
         'filter_placeholder': 'Enter {field}',
         'select_placeholder': 'Select {field}',
         'list': 'List',
+
+        # System Management Menu
+        'system_management': 'System Management',
+        'user_management': 'User Management',
+        'role_management': 'Role Management',
+        'user_role_management': 'User Role Management',
     }
 }
 

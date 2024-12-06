@@ -164,12 +164,11 @@ $(document).ready(function() {
 
     var config = window.serverConfig;
     console.log('Table config:', config);
+    console.log('Inlines:', config.inlines);
     
     // 确保在获取到配置后再渲染工具栏
     renderToolbar();
 
-    var $table = $('#dataTable');
-    
     // 构建表格列配置
     var columns = [{checkbox: true}];
     config.tableFields.forEach(function(field) {
@@ -205,27 +204,21 @@ $(document).ready(function() {
     });
 
     // 只有在 enableEdit 或 allowDelete 为 true 时才添加操作列
-    if (config.enableEdit || config.allowDelete || config.inlines) {  // 添加 config.inlines 条件
+    if (config.enableEdit || config.allowDelete || config.inlines) {
         columns.push({
             field: 'operate',
             title: translations.operation,
-            width: 150,  // 增加宽度以适应更多按钮
+            width: 150,
             formatter: function(value, row) {
                 try {
-                    // 确保从 row.data 中获取 id
                     const rowData = row.data || row;
                     const id = rowData.id;
-                    
-                    // 创建一个不包含敏感数据的对象副本
                     const safeData = Object.assign({}, rowData);
                     delete safeData.display;
-                    
-                    // 将数据转换为 URL 安全的字符串
                     const encodedData = encodeURIComponent(JSON.stringify(safeData));
                     
                     let buttons = [];
                     
-                    // 编辑按钮
                     if (config.enableEdit) {
                         buttons.push(`
                             <button class="btn btn-sm btn-warning" 
@@ -235,7 +228,6 @@ $(document).ready(function() {
                         `);
                     }
                     
-                    // 删除按钮
                     if (config.allowDelete) {
                         buttons.push(`
                             <button class="btn btn-sm btn-danger" 
@@ -245,9 +237,8 @@ $(document).ready(function() {
                         `);
                     }
 
-                    // 内联数据按钮
                     if (config.inlines && config.inlines.length > 0) {
-                        const inline = config.inlines[0];  // 获取第一个内联配置
+                        const inline = config.inlines[0];
                         buttons.push(`
                             <button class="btn btn-sm btn-info" 
                                     onclick="handleCustomAction('view_documents', '${id}', '${inline.model}')">
@@ -265,15 +256,11 @@ $(document).ready(function() {
         });
     }
 
-    // 添加更调试日志
-    console.log('Initializing table with URL:', `/admin/${config.modelName}/data`);
-    console.log('Table columns:', columns);
-
-    // 初始化表格
-    $table.bootstrapTable({
+    // 初始化表格并保存到全局变量
+    window.$table = $('#dataTable').bootstrapTable({
         url: `/admin/${config.modelName}/data`,
         method: 'GET',
-        columns: columns,
+        columns: columns,  // 使用构建好的列配置
         toggle: 'table',
         pagination: true,
         sidePagination: 'server',
@@ -291,6 +278,8 @@ $(document).ready(function() {
         maintainMetaData: true,
         queryParamsType: 'limit',
         queryParams: function(params) {
+            console.log('Original params:', params);
+            
             // 获取所有过滤字段的值
             var filterData = {};
             $('.filter-field').each(function() {
@@ -302,8 +291,10 @@ $(document).ready(function() {
                 }
             });
 
+            console.log('Filter data:', filterData);
+
             // 合并所有参数
-            return {
+            var finalParams = {
                 limit: params.limit,
                 offset: params.offset,
                 search: params.search,
@@ -311,6 +302,9 @@ $(document).ready(function() {
                 order: params.order,
                 ...filterData  // 添加过滤参数
             };
+            
+            console.log('Final params:', finalParams);
+            return finalParams;
         },
         responseHandler: function(res) {
             console.log('Server response:', res);
@@ -345,6 +339,9 @@ $(document).ready(function() {
             console.log('Page changed to:', number, 'Size:', size);
         }
     });
+
+    // 确保表格已初始化
+    console.log('Table initialized:', window.$table);
 
     // 初始化过滤器
     initializeFilter($table);
@@ -490,7 +487,7 @@ $(document).ready(function() {
     window.refreshTable = function() {
         $table.bootstrapTable('refresh', {
             silent: false,
-            reset: true  // 重置页码和其他状态
+            reset: true  // ��置页码和其他状态
         });
     };
 
@@ -601,7 +598,7 @@ $(document).ready(function() {
         }
     };
 
-    // 添加关联数据弹窗
+    // 添加关联数据窗
     function showInlineModal(options) {
         console.log('Showing inline modal with options:', options);
         console.log('Fields config:', options.config.fields);
@@ -658,11 +655,26 @@ $(document).ready(function() {
             <tr>
                 ${options.config.fields.map(field => {
                     const value = item.display[field.name] || item.data[field.name] || '';
-                    // 处理链接类型字段
-                    if (field.display_type === 'link') {
-                        return `<td><a href="${value}" target="_blank">${value}</a></td>`;
+                    
+                    // 处理链接和其他显示类型
+                    if (field.is_link || field.display_type === 'link') {
+                        const baseUrl = `/admin/${options.model}/${item.data.id}`;
+                        return `<td><a href="${baseUrl}" class="text-decoration-none link-primary" 
+                                  title="点击查看详情">${value}</a></td>`;
                     }
-                    return `<td>${value}</td>`;
+                    
+                    switch (field.display_type) {
+                        case 'boolean':
+                            return `<td>${value === 'True' ? 
+                                '<i class="bi bi-check-circle text-success"></i>' : 
+                                '<i class="bi bi-x-circle text-danger"></i>'}</td>`;
+                        case 'datetime':
+                            return `<td><span class="text-muted">${value}</span></td>`;
+                        case 'status':
+                            return `<td><span class="badge bg-primary">${value}</span></td>`;
+                        default:
+                            return `<td>${value}</td>`;
+                    }
                 }).join('')}
                 <td>
                     <button class="btn btn-sm btn-warning" onclick="editInlineRecord('${options.model}', '${item.data.id}')">
@@ -703,7 +715,7 @@ $(document).ready(function() {
             })
             .then(response => {
                 if (response.ok) {
-                    // 刷新表格
+                    // 刷新表
                     document.getElementById('inlineModal').querySelector('tbody').innerHTML = 
                         generateInlineTableRows(currentInlineOptions);
                 } else {

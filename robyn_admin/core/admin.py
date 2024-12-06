@@ -55,6 +55,7 @@ class ModelAdmin:
     
     def __init__(self, model: Type[Model]):
         self.model = model
+        self.is_inline = False  # 添加标识
         
         # 确保基本属性被设置
         self.verbose_name = getattr(self, 'verbose_name', model.__name__)
@@ -265,7 +266,7 @@ class ModelAdmin:
         return False
 
     def get_filter_choices(self, field_name: str) -> List[tuple]:
-        # 从 filter_fields 中获取选项
+        # 从 filter_fields 中获取选
         for field in self.filter_fields:
             if field.name == field_name:
                 if field.choices:
@@ -381,26 +382,39 @@ class ModelAdmin:
     @trace_method
     async def get_frontend_config(self) -> dict:
         """获取前端配置"""
-        # 获取过滤字段
+        form_fields = await self.get_form_fields()
+        add_form_fields = await self.get_add_form_fields()
+        # 异步获取过滤字段
         filter_fields = await self.get_filter_fields()
         
         config = {
             "tableFields": [field.to_dict() for field in self.table_fields],
             "modelName": self.model.__name__,
             "pageSize": self.per_page,
-            "formFields": [field.to_dict() for field in self.form_fields],
-            "addFormFields": [field.to_dict() for field in self.add_form_fields],
+            "formFields": [field.to_dict() for field in form_fields],
+            "addFormFields": [field.to_dict() for field in add_form_fields],
             "addFormTitle": self.add_form_title or f"添加{self.verbose_name}",
             "editFormTitle": self.edit_form_title or f"编辑{self.verbose_name}",
             "searchFields": [field.to_dict() for field in self.search_fields],
-            "filterFields": [field.to_dict() for field in filter_fields],
+            "filterFields": [field.to_dict() for field in filter_fields],  # 使用异步获取的filter_fields
             "enableEdit": self.enable_edit,
             "allowAdd": self.allow_add,
             "allowDelete": self.allow_delete,
             "allowExport": self.allow_export,
             "verbose_name": self.verbose_name,
+            "is_inline": self.is_inline,
+            "inlines": [
+                {
+                    "model": inline.model.__name__,
+                    "fields": [field.to_dict() for field in inline.table_fields],
+                    "title": getattr(inline.model.Meta, 'description', inline.verbose_name)
+                }
+                for inline in getattr(self, 'inlines', [])
+            ]
         }
         
+        print("Frontend config:", config)  # 添加调试信息
+        print("Filter fields:", config["filterFields"])  # 添加过滤字段调试信息
         return config
 
     async def get_inline_formsets(self, instance=None):
@@ -433,7 +447,7 @@ class ModelAdmin:
                 print(f"No parent instance found with id: {parent_id}")
                 return []
             
-            # 获取关联的记录
+            # 获取关联���记录
             queryset = await inline.get_queryset(parent_instance)
             
             data = []
@@ -475,4 +489,16 @@ class ModelAdmin:
         config["inlines"] = inlines
         
         return config
+
+    async def get_form_fields(self):
+        """获取表单字段配置，支持动态获取"""
+        if hasattr(self, 'form_fields'):
+            return self.form_fields
+        return []
+        
+    async def get_add_form_fields(self):
+        """获取添加表单字段配置，支持动态获取"""
+        if hasattr(self, 'add_form_fields'):
+            return self.add_form_fields
+        return await self.get_form_fields()
 

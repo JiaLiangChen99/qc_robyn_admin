@@ -8,15 +8,23 @@
 <div class="container-fluid">
     <div class="row">
         <div class="col">
+            {# 添加过滤器面板 #}
+            {% if frontend_config.filterFields %}
+            {% include "admin/components/filter_panel.html" %}
+            {% endif %}
+            
             {# 添加表单模态框组件 #}
             {% include "admin/components/form_modal.html" %}
             
             {# 添加内联数据模态框组件 #}
             {% include "admin/components/inline_modal.html" %}
             
-            {# 传递过滤器配置 #}
-            {% set filters = frontend_config.filterFields %}
-            {% include "admin/components/data_table.html" %}
+            {# 只在非内联模型时显示数据表格 #}
+            {% if not frontend_config.is_inline %}
+                {# 传递过滤器配置 #}
+                {% set filters = frontend_config.filterFields %}
+                {% include "admin/components/data_table.html" %}
+            {% endif %}
         </div>
     </div>
 </div>
@@ -26,9 +34,8 @@
 {{ super() }}
 <script>
 // 初始化前端配置
-(function() {
-    window.serverConfig = {{ frontend_config|tojson|safe }};
-})();
+window.serverConfig = {{ frontend_config|tojson|safe }};
+console.log('Server config initialized:', window.serverConfig);
 
 // 处理表格操作
 function handleAction(action, id, rowData) {
@@ -43,7 +50,6 @@ function handleAction(action, id, rowData) {
             return;
         }
     }
-    
     switch(action) {
         case 'edit':
             if (!id || id === 'undefined') {
@@ -72,15 +78,13 @@ function handleAction(action, id, rowData) {
 async function deleteRecord(id) {
     if (!id || id === 'undefined') {
         console.error('Invalid id for delete');
-        alert('无效的记录ID');
+        alert('无的记录ID');
         return;
     }
-    
     try {
         const response = await fetch(`/admin/${window.serverConfig.modelName}/${id}/delete`, {
             method: 'POST'
         });
-        
         if(response.ok) {
             $('#dataTable').bootstrapTable('refresh');
         } else {
@@ -92,7 +96,12 @@ async function deleteRecord(id) {
     }
 }
 </script>
-{{ table_scripts() }}
+
+{# 确保在配置初始化后加载表格脚本 #}
+{% if not frontend_config.is_inline %}
+    {{ table_scripts() }}
+{% endif %}
+
 {{ form_scripts() }}
 {{ inline_modal_scripts() }}
 {% endblock %} 

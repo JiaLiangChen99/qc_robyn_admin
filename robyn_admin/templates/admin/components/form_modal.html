@@ -26,11 +26,21 @@ function showFormModal(action, data = null) {
     $('#formFields').empty();
     
     var config = window.serverConfig;
+    console.log('Server config:', config);
+    
     var formFields = action === 'add' ? config.addFormFields : config.formFields;
+    console.log('Form fields:', formFields);
+    
     var title = action === 'add' ? config.addFormTitle : config.editFormTitle;
     
     // 设置标题
     $('.modal-title').text(title);
+    
+    // 确保formFields存在
+    if (!formFields) {
+        console.error('Form fields not found in config:', config);
+        return;
+    }
     
     // 生成表单字段
     formFields.forEach(function(field) {
@@ -39,6 +49,22 @@ function showFormModal(action, data = null) {
         
         // 根据字段类型生成不同的表单控件
         switch(field.field_type) {
+            case 'select':
+                fieldHtml = `
+                    <div class="mb-3">
+                        <label class="form-label">${field.label}</label>
+                        <select class="form-select" name="${field.name}"
+                                ${field.required ? 'required' : ''}>
+                            <option value="">请选择</option>
+                            ${Object.entries(field.choices || {}).map(([value, label]) => 
+                                `<option value="${value}" 
+                                    ${fieldValue == value ? 'selected' : ''}>
+                                    ${label}
+                                </option>`
+                            ).join('')}
+                        </select>
+                    </div>`;
+                break;
             case 'datetime':
                 fieldHtml = `
                     <div class="mb-3">
@@ -66,20 +92,13 @@ function showFormModal(action, data = null) {
                         <label class="form-check-label" for="${field.name}">${field.label}</label>
                     </div>`;
                 break;
-            case 'select':
+            case 'password':
                 fieldHtml = `
                     <div class="mb-3">
                         <label class="form-label">${field.label}</label>
-                        <select class="form-select" name="${field.name}"
-                                ${field.required ? 'required' : ''}>
-                            <option value="">请选择</option>
-                            ${(field.choices || []).map(choice => 
-                                `<option value="${choice[0]}" 
-                                    ${fieldValue == choice[0] ? 'selected' : ''}>
-                                    ${choice[1]}
-                                </option>`
-                            ).join('')}
-                        </select>
+                        <input type="password" class="form-control" 
+                               name="${field.name}"
+                               ${field.required ? 'required' : ''}>
                     </div>`;
                 break;
             default:
