@@ -177,6 +177,51 @@ $(document).ready(function() {
                 field: field.name,
                 title: field.label,
                 formatter: function(value, row) {
+                    // 处理 switch 类型
+                    if (field.display_type === 'switch') {
+                        // 确定当前值是否为"开启"状态
+                        const isChecked = (
+                            value === field.choices[true] || 
+                            value === true || 
+                            value === 'true' || 
+                            value === 'True' || 
+                            value === '1' || 
+                            value === 1
+                        );
+                        
+                        // 获取显示文本
+                        const onText = field.labels ? field.labels[true] : '是';
+                        const offText = field.labels ? field.labels[false] : '否';
+                        
+                        // 获取实际值
+                        const onValue = field.choices ? field.choices[true] : true;
+                        const offValue = field.choices ? field.choices[false] : false;
+                        
+                        console.log('Switch value:', {
+                            originalValue: value,
+                            isChecked: isChecked,
+                            onText: onText,
+                            offText: offText,
+                            onValue: onValue,
+                            offValue: offValue
+                        });
+                        
+                        return `
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" 
+                                       id="switch-${row.id}-${field.name}"
+                                       ${isChecked ? 'checked' : ''}
+                                       data-on-value="${onValue}"
+                                       data-off-value="${offValue}"
+                                       onchange="handleSwitchChange('${row.id}', '${field.name}', this)"
+                                       ${field.editable ? '' : 'disabled'}>
+                                <label class="form-check-label" for="switch-${row.id}-${field.name}">
+                                    ${isChecked ? onText : offText}
+                                </label>
+                            </div>
+                        `;
+                    }
+                    
                     if (field.actions && field.actions.length > 0) {
                         // 生成自定义操作按钮
                         return field.actions.map(action => `
@@ -258,7 +303,7 @@ $(document).ready(function() {
 
     // 初始化表格并保存到全局变量
     window.$table = $('#dataTable').bootstrapTable({
-        url: `/admin/${config.modelName}/data`,
+        url: `/admin/${config.route_id}/data`,
         method: 'GET',
         columns: columns,  // 使用构建好的列配置
         toggle: 'table',
@@ -487,7 +532,7 @@ $(document).ready(function() {
     window.refreshTable = function() {
         $table.bootstrapTable('refresh', {
             silent: false,
-            reset: true  // ��置页码和其他状态
+            reset: true  // 重置页码和其他状态
         });
     };
 
@@ -566,7 +611,7 @@ $(document).ready(function() {
     window.handleCustomAction = async function(action, id, inlineModel) {
         if (action === 'view_documents') {
             try {
-                const response = await fetch(`/admin/${config.modelName}/inline_data?parent_id=${id}&inline_model=${inlineModel}`);
+                const response = await fetch(`/admin/${config.route_id}/inline_data?parent_id=${id}&inline_model=${inlineModel}`);
                 if (!response.ok) {
                     const errorText = await response.text();
                     throw new Error(errorText);
@@ -635,7 +680,7 @@ $(document).ready(function() {
             </div>
         `;
         
-        // 移除已存在的模态框
+        // 移除已存在的��态框
         const existingModal = document.getElementById('inlineModal');
         if (existingModal) {
             existingModal.remove();
@@ -695,7 +740,7 @@ $(document).ready(function() {
 
     // 编辑关联记录
     window.editInlineRecord = function(model, id) {
-        // 获取记录数据并显编辑表单
+        // 获��记录数据并显编辑表单
         fetch(`/admin/${model}/${id}`)
             .then(response => response.json())
             .then(data => {
@@ -744,5 +789,63 @@ window.setLanguage = function(lang) {
         }
     });
 };
+
+// 修改开关切换处理函数
+window.handleSwitchChange = async function(id, field, switchElement) {
+    const isChecked = switchElement.checked;
+    const onValue = switchElement.dataset.onValue;
+    const offValue = switchElement.dataset.offValue;
+    const newValue = isChecked ? onValue : offValue;
+    
+    try {
+        const response = await fetch(`/admin/${window.serverConfig.route_id}/${id}/edit`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                [field]: newValue
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('更新失败');
+        }
+        
+        // 更新成功后刷新表格
+        $('#dataTable').bootstrapTable('refresh');
+        
+    } catch (error) {
+        console.error('Switch change error:', error);
+        alert('更新失败');
+        // 恢复开关状态
+        switchElement.checked = !isChecked;
+    }
+};
 </script>
 {% endmacro %}
+
+<style>
+    /* 美化 switch 开关样式 */
+    .form-switch {
+        padding-left: 2.5em;
+    }
+    
+    .form-switch .form-check-input {
+        width: 2em;
+        margin-left: -2.5em;
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='rgba%280, 0, 0, 0.25%29'/%3e%3c/svg%3e");
+        background-position: left center;
+        border-radius: 2em;
+        transition: background-position .15s ease-in-out;
+    }
+    
+    .form-switch .form-check-input:checked {
+        background-position: right center;
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
+    }
+    
+    .form-check-label {
+        margin-left: 0.5em;
+    }
+</style>

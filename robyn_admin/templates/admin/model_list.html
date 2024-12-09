@@ -39,12 +39,14 @@ console.log('Server config initialized:', window.serverConfig);
 
 // 处理表格操作
 function handleAction(action, id, rowData) {
+    console.log('Action:', action, 'ID:', id, 'Row data:', rowData);
+    
     let row = null;
     if (rowData) {
         try {
             row = JSON.parse(decodeURIComponent(rowData));
-            // 确保 row 中包含 id
             row.id = id;
+            console.log('Parsed row data:', row);
         } catch (e) {
             console.error('Error parsing row data:', e);
             return;
@@ -57,6 +59,11 @@ function handleAction(action, id, rowData) {
                 alert('无效的记录ID');
                 return;
             }
+            $('#formModal').data({
+                currentData: row,
+                action: 'edit',
+                routeId: window.serverConfig.route_id
+            });
             showFormModal('edit', row);
             break;
         case 'delete':
@@ -78,11 +85,11 @@ function handleAction(action, id, rowData) {
 async function deleteRecord(id) {
     if (!id || id === 'undefined') {
         console.error('Invalid id for delete');
-        alert('无的记录ID');
+        alert('无效的记录ID');
         return;
     }
     try {
-        const response = await fetch(`/admin/${window.serverConfig.modelName}/${id}/delete`, {
+        const response = await fetch(`/admin/${window.serverConfig.route_id}/${id}/delete`, {
             method: 'POST'
         });
         if(response.ok) {

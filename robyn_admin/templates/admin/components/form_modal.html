@@ -26,11 +26,17 @@ function showFormModal(action, data = null) {
     $('#formFields').empty();
     
     var config = window.serverConfig;
-    console.log('Server config:', config);
+    console.log('Show form modal:', {
+        action: action,
+        data: data,
+        config: config
+    });
+    
+    // 保存当前操作和数据到模态框
+    $('#formModal').data('currentData', data);
+    $('#formModal').data('action', action);
     
     var formFields = action === 'add' ? config.addFormFields : config.formFields;
-    console.log('Form fields:', formFields);
-    
     var title = action === 'add' ? config.addFormTitle : config.editFormTitle;
     
     // 设置标题
@@ -132,12 +138,24 @@ async function submitForm() {
     }
     
     try {
-        // 根据是否有ID判断是添加还是编辑
-        var currentData = $('#formModal').data('currentData');
-        var url = currentData && currentData.id ? 
-            `/admin/${config.modelName}/${currentData.id}/edit` : 
-            `/admin/${config.modelName}/add`;
+        // 获取当前操作类型和数据
+        var modal = $('#formModal');
+        var currentData = modal.data('currentData');
+        var action = modal.data('action');
+        
+        console.log('Submit form:', {
+            action: action,
+            currentData: currentData,
+            formData: Object.fromEntries(data)
+        });
+
+        // 根据操作类型决定URL
+        var url = action === 'edit' && currentData && currentData.id ? 
+            `/admin/${config.route_id}/${currentData.id}/edit` : 
+            `/admin/${config.route_id}/add`;
             
+        console.log('Submit URL:', url); // 添加调试日志
+
         const response = await fetch(url, {
             method: 'POST',
             body: data,
@@ -148,8 +166,12 @@ async function submitForm() {
         
         if (response.ok) {
             // 关闭模态框
-            var modal = bootstrap.Modal.getInstance(document.getElementById('formModal'));
-            modal.hide();
+            var modalInstance = bootstrap.Modal.getInstance(document.getElementById('formModal'));
+            modalInstance.hide();
+            
+            // 清除模态框数据
+            modal.removeData('currentData');
+            modal.removeData('action');
             
             // 刷新表格
             $('#dataTable').bootstrapTable('refresh');

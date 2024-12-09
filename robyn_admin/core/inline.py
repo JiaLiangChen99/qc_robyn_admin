@@ -64,7 +64,6 @@ class InlineModelAdmin:
             field.name for field in self.table_fields 
             if field.sortable
         ]
-        print("关联查询表单", ordering_fields)
         return {
             'model': self.model.__name__,
             'fk_field': self.fk_field,

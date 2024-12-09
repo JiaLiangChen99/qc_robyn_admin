@@ -46,6 +46,7 @@ class AdminSite:
         self.title = title          # 后台名称
         self.prefix = prefix        # 路由前缀
         self.models: Dict[str, ModelAdmin] = {}
+        self.model_registry = {}
         self.default_language = default_language
         self.menu_manager = MenuManager()
         self.copyright = copyright   # 添加版权属性
@@ -138,7 +139,6 @@ class AdminSite:
 
     def _setup_routes(self):
         """设置路由"""
-        # 修改所有路由使用self.prefix
         @self.app.get(f"/{self.prefix}")
         async def admin_index(request: Request):
             user = await self._get_current_user(request)
@@ -147,15 +147,15 @@ class AdminSite:
             
             # 过滤用户有权限访问的模型
             filtered_models = {}
-            for model_name, model_admin in self.models.items():
-                if await self.check_permission(request, model_name, 'view'):
-                    filtered_models[model_name] = model_admin
+            for route_id, model_admin in self.models.items():
+                if await self.check_permission(request, route_id, 'view'):
+                    filtered_models[route_id] = model_admin
             
             language = await self._get_language(request)  # 获取语言设置
             context = {
                 "site_title": self.title,
                 "models": filtered_models,  # 使用过滤后的模型字典
-                "menus": self.menu_manager.get_menu_tree(),
+                "menus": self.menu_manager.get_menu_tree(), # 获取菜单结构展示在左侧
                 "user": user,
                 "language": language
             }
@@ -219,7 +219,7 @@ class AdminSite:
                 
         @self.app.get(f"/{self.prefix}/logout")
         async def admin_logout(request: Request):
-            # 清除cookie时也需要设置同的属性
+            # 清除cookie时也需���设置同的属性
             cookie_attrs = [
                 "session=",  # 空值
                 "HttpOnly",
@@ -238,10 +238,10 @@ class AdminSite:
                 }
             )
         
-        @self.app.get(f"/{self.prefix}/:model_name/search")
+        @self.app.get(f"/{self.prefix}/:route_id/search")
         async def model_search(request: Request):
             """模型页面中，搜索功能相关接口，进行匹配查询结果"""
-            model_name: str = request.path_params.get("model_name")
+            route_id: str = request.path_params.get("route_id")
             user = await self._get_current_user(request)
             if not user:
                 return Response(
@@ -250,7 +250,7 @@ class AdminSite:
                     headers={"Content-Type": "application/json"}
                 )
             
-            model_admin = self.models.get(model_name)
+            model_admin = self.models.get(route_id)
             if not model_admin:
                 return Response(
                     status_code=404, 
@@ -266,7 +266,7 @@ class AdminSite:
             }
             print("搜索参数", search_values)
             # 执行搜索查询
-            queryset = await model_admin.get_queryset(None, search_values)
+            queryset = await model_admin.get_queryset(request, search_values)
             objects = await queryset.limit(model_admin.per_page)
             
             # 序列化结果
@@ -283,28 +283,46 @@ class AdminSite:
             return jsonify(result)
 
 
-        @self.app.get(f"/{self.prefix}/:model_name")
+        @self.app.get(f"/{self.prefix}/:route_id")
         async def model_list(request: Request):
             try:
-                model_name: str = request.path_params.get("model_name")
+                route_id: str = request.path_params.get("route_id")
                 user = await self._get_current_user(request)
                 if not user:
-                    return Response(status_code=303, headers={"Location": f"/{self.prefix}/login"})
-                    
-                # 检查权限
-                if not await self.check_permission(request, model_name, 'view'):
-                    return Response(status_code=403, description="没有权限访问此页面", headers={"Location": f"/{self.prefix}/"})
-                    
-                model_admin = self.models.get(model_name)
+                    return Response(
+                        status_code=303, 
+                        headers={"Location": f"/{self.prefix}/login"},
+                        description="Not logged in"
+                    )
+                
+                # 检查权限时使用route_id
+                if not await self.check_permission(request, route_id, 'view'):
+                    return Response(
+                        status_code=403, 
+                        headers={"Content-Type": "text/html"},
+                        description="没有��限访问此页面"
+                    )
+                
+                # 获取模型管理器实例
+                print("获取类", self.models)
+                print("获取映射模型类", self.model_registry)
+                model_admin = self.get_model_admin(route_id)
                 if not model_admin:
-                    return Response(status_code=404, description="模型不存在", headers={"Location": f"/{self.prefix}/login"})
+                    print(f"Model admin not found for route_id: {route_id}")
+                    print(f"Available route_ids: {list(self.models.keys())}")
+                    return Response(
+                        status_code=404, 
+                        headers={"Content-Type": "text/html"},
+                        description="model not found"
+                    )
+                
                 # 获取前端配置
                 frontend_config = await model_admin.get_frontend_config()
-                print("Model list frontend config:", frontend_config)  # 添加调试信息
+                print("Model list frontend config:", frontend_config)
                 
                 language = await self._get_language(request)
-                # 添加语言配置
                 frontend_config["language"] = language
+                
                 # 添加翻译文本
                 translations = {
                     "add": get_text("add", language),
@@ -329,21 +347,22 @@ class AdminSite:
                 
                 # 过滤用户有权限访问的模型
                 filtered_models = {}
-                for model_name, model_admin in self.models.items():
-                    if await self.check_permission(request, model_name, 'view'):
-                        filtered_models[model_name] = model_admin
+                for rid, madmin in self.models.items():
+                    if await self.check_permission(request, rid, 'view'):
+                        filtered_models[rid] = madmin
 
                 context = {
                     "site_title": self.title,
-                    "models": filtered_models,  # 使用过滤后的模型字典
+                    "models": filtered_models,
                     "menus": self.menu_manager.get_menu_tree(),
                     "user": user,
                     "language": language,
-                    "current_model": model_name,
+                    "current_model": route_id,
                     "verbose_name": model_admin.verbose_name,
-                    "frontend_config": frontend_config,  # 确保这里正确传递
+                    "frontend_config": frontend_config,
                     "translations": translations
                 }
+                print("成功返回页面")
                 return self.jinja_template.render_template("admin/model_list.html", **context)
                 
             except Exception as e:
@@ -351,21 +370,22 @@ class AdminSite:
                 traceback.print_exc()
                 return Response(
                     status_code=500,
+                    headers={"Content-Type": "text/html"},
                     description=f"获取列表页失败: {str(e)}"
                 )
 
 
-        @self.app.post(f"/{self.prefix}/:model_name/add")
+        @self.app.post(f"/{self.prefix}/:route_id/add")
         async def model_add_post(request: Request):
             """处理添加记录"""
             try:
-                model_name: str = request.path_params.get("model_name")
-                model_admin = self.models.get(model_name)
+                route_id: str = request.path_params.get("route_id")
+                model_admin = self.models.get(route_id)
                 if not model_admin:
                     return Response(status_code=404, description="模型不存在")
                 
                 # 检查权限
-                if not await self.check_permission(request, model_name, 'add'):
+                if not await self.check_permission(request, route_id, 'add'):
                     return jsonify({"error": "没有添加权限"})
                 
                 # 获取动态表单字段
@@ -389,38 +409,44 @@ class AdminSite:
                 print(f"Error in model_add_post: {str(e)}")
                 return jsonify({"error": str(e)})
 
-        @self.app.post(f"/{self.prefix}/:model_name/:id/edit")
+        @self.app.post(f"/{self.prefix}/:route_id/:id/edit")
         async def model_edit_post(request: Request):
             """处理编辑记录"""
-            model_name: str = request.path_params.get("model_name")
+            route_id: str = request.path_params.get("route_id")
             object_id: str = request.path_params.get("id")
             print("编辑的表单数据", object_id)
             user = await self._get_current_user(request)
             if not user:
                 return Response(status_code=303, headers={"Location": f"/{self.prefix}/login"})
             
-            model_admin = self.models.get(model_name)
+            model_admin = self.models.get(route_id)
             if not model_admin:
-                return Response(status_code=404, description="模型不存��")
+                return Response(status_code=404, description="model not found")
             
             if not model_admin.enable_edit:
-                return Response(status_code=403, description="该模型不允许编辑")
+                return Response(status_code=403, description="model not allow edit")
             
             try:
                 # 检查权限
-                if not await self.check_permission(request, model_name, 'edit'):
-                    return Response(status_code=403, description="没有编辑权限")
+                if not await self.check_permission(request, route_id, 'edit'):
+                    return Response(status_code=403, description="do not have edit permission")
                 
                 # 获取要编辑的对象
                 obj = await model_admin.get_object(object_id)
                 if not obj:
-                    return Response(status_code=404, description="记录不存在")
+                    return Response(status_code=404, description="record not found")
                 
                 # 解析表单数
                 data = request.body
+                print("form data", data)
                 params = parse_qs(data)
-                form_data = {key: value[0] for key, value in params.items()}
-                
+                # 进行反序列化判断
+                form_data = {}
+                for key, value in params.items():
+                    try:
+                        form_data[key] = json.loads(value[0])
+                    except:
+                        form_data[key] = value[0]   
                 # 处理表数
                 processed_data = {}
                 for field in model_admin.form_fields:
@@ -429,12 +455,14 @@ class AdminSite:
                 
                 # 更新对象
                 for field, value in processed_data.items():
+                    print("value type", type(value))
+                    print(f"更新字段: {field} = {value}")
                     setattr(obj, field, value)
                 await obj.save()
                 
                 return Response(
                     status_code=200,
-                    description="更新成功",
+                    description="update success",
                     headers={"Content-Type": "application/json"}
                 )
                 
@@ -442,53 +470,53 @@ class AdminSite:
                 print(f"编辑失: {str(e)}")
                 return Response(
                     status_code=400,
-                    description=f"编辑失败: {str(e)}",
+                    description=f"edit failed: {str(e)}",
                     headers={"Content-Type": "application/json"}
                 )
 
-        @self.app.post(f"/{self.prefix}/:model_name/:id/delete")
+        @self.app.post(f"/{self.prefix}/:route_id/:id/delete")
         async def model_delete(request: Request):
             """处理删除记录"""
-            model_name: str = request.path_params.get("model_name")
+            route_id: str = request.path_params.get("route_id")
             object_id: str = request.path_params.get("id")
             
             user = await self._get_current_user(request)
             if not user:
                 return Response(status_code=401, description="未登录", headers={"Location": f"/{self.prefix}/login"})
             
-            model_admin = self.models.get(model_name)
+            model_admin = self.models.get(route_id)
             if not model_admin:
                 return Response(status_code=404, description="模型不存在", headers={"Location": f"/{self.prefix}/login"})
             
             try:
                 # 检查权限
-                if not await self.check_permission(request, model_name, 'delete'):
+                if not await self.check_permission(request, route_id, 'delete'):
                     return Response(status_code=403, description="没有删除权限")
                 
                 # 获取要删除的对象
                 obj = await model_admin.get_object(object_id)
                 if not obj:
-                    return Response(status_code=404, description="记录不存在", headers={"Location": f"/{self.prefix}/{model_name}"})
+                    return Response(status_code=404, description="记录不存在", headers={"Location": f"/{self.prefix}/{route_id}"})
                 
                 # 删除对象
                 await obj.delete()
                 
-                return Response(status_code=200, description="删除成功", headers={"Location": f"/{self.prefix}/{model_name}"})
+                return Response(status_code=200, description="删除成功", headers={"Location": f"/{self.prefix}/{route_id}"})
             except Exception as e:
                 print(f"除失败: {str(e)}")
-                return Response(status_code=500, description=f"删除失败: {str(e)}", headers={"Location": f"/{self.prefix}/{model_name}"}  )
+                return Response(status_code=500, description=f"删除失败: {str(e)}", headers={"Location": f"/{self.prefix}/{route_id}"}  )
         
-        @self.app.get(f"/{self.prefix}/:model_name/data")
+        @self.app.get(f"/{self.prefix}/:route_id/data")
         async def model_data(request: Request):
             """获取模型数据"""
             try:
-                model_name: str = request.path_params.get("model_name")
-                print(f"Handling data request for model: {model_name}")
-                model_admin = self.get_model_admin(model_name)
+                route_id: str = request.path_params.get("route_id")
+                print(f"Handling data request for model: {route_id}")
+                model_admin = self.get_model_admin(route_id)
                 if not model_admin:
-                    print(f"Model admin not found for: {model_name}")
+                    print(f"Model admin not found for: {route_id}")
                     print(f"Available models: {list(self.models.keys())}")
-                    return jsonify({"error": "Model not found"}, status_code=404)
+                    return jsonify({"error": "Model not found"})
                 # 解析查询参数
                 params: dict = request.query_params.to_dict()
                 query_params = {
@@ -542,16 +570,16 @@ class AdminSite:
                 traceback.print_exc()
                 return jsonify({"error": str(e)})
         
-        @self.app.post(f"/{self.prefix}/:model_name/batch_delete")
+        @self.app.post(f"/{self.prefix}/:route_id/batch_delete")
         async def model_batch_delete(request: Request):
             """批量删除记录"""
             try:
-                model_name: str = request.path_params.get("model_name")
+                route_id: str = request.path_params.get("route_id")
                 user = await self._get_current_user(request)
                 if not user:
                     return Response(status_code=401, description="未登录", headers={"Location": f"/{self.prefix}/login"})
                 
-                model_admin = self.models.get(model_name)
+                model_admin = self.models.get(route_id)
                 if not model_admin:
                     return Response(status_code=404, description="型不存在", headers={"Location": f"/{self.prefix}/login"})
                 
@@ -616,7 +644,7 @@ class AdminSite:
                         "message": "没上传文件",
                         "success": False
                     })
-                # 获取上传路参数
+                # 获取上传路��数
                 upload_path = request.form_data.get('upload_path', 'static/uploads')
                 # 处理上传的文件
                 uploaded_files = []
@@ -706,13 +734,13 @@ class AdminSite:
                 print(f"Set language failed: {str(e)}")
                 return Response(status_code=500, description="Set language failed")
         
-        @self.app.get(f"/{self.prefix}/:model_name/inline_data")
+        @self.app.get(f"/{self.prefix}/:route_id/inline_data")
         async def get_inline_data(request: Request):
             try:
-                model_name = request.path_params['model_name']
-                model_admin = self.get_model_admin(model_name)
+                route_id = request.path_params['route_id']
+                model_admin = self.get_model_admin(route_id)
                 if not model_admin:
-                    print(f"Model admin not found for: {model_name}")
+                    print(f"Model admin not found for: {route_id}")
                     return jsonify({"error": "Model not found"}, status_code=404)
                 
                 params: dict = request.query_params.to_dict()
@@ -723,7 +751,7 @@ class AdminSite:
                 sort_field = params.get('sort', [''])[0]
                 sort_order = params.get('order', ['asc'])[0]
                 
-                print(f"Getting inline data for {model_name}, parent_id: {parent_id}, inline_model: {inline_model}")
+                print(f"Getting inline data for {route_id}, parent_id: {parent_id}, inline_model: {inline_model}")
                 
                 if not parent_id or not inline_model:
                     print("Missing required parameters")
@@ -797,16 +825,40 @@ class AdminSite:
                 )
         
     def register_model(self, model: Type[Model], admin_class: Optional[Type[ModelAdmin]] = None):
-        """注册型到admin点"""
+        """注册模型到admin站点"""
         if admin_class is None:
             admin_class = ModelAdmin
+            
+        # 创建管理类实例
         instance = admin_class(model)
+        
+        # 生成唯一的路由标识符
+        route_id = admin_class.__name__
+        
+        # 如果路由标识符已存在，添加数字后缀
+        base_route_id = route_id
+        counter = 1
+        while route_id in self.models:
+            route_id = f"{base_route_id}{counter}"
+            counter += 1
+            
+        # 存储路由标识符到实例中，用于后续路由生成
+        instance.route_id = route_id
+        
         print(f"\n=== Registering Model ===")
         print(f"Model: {model.__name__}")
         print(f"Admin Class: {admin_class.__name__}")
+        print(f"Route ID: {route_id}")
         print("========================\n")
-        self.models[model.__name__] = instance
         
+        # 使用路由标识符作为键存储管理类实例
+        self.models[route_id] = instance
+        
+        # 更新模型到管理类的映射
+        if model.__name__ not in self.model_registry:
+            self.model_registry[model.__name__] = []
+        self.model_registry[model.__name__].append(instance)
+
     async def _get_current_user(self, request: Request) -> Optional[AdminUser]:
         """获取当前登录用户"""
         try:
@@ -842,10 +894,8 @@ class AdminSite:
                 print(f"User Roles: {[role.name for role in roles]}")
                 print(f"Role Models: {[role.accessible_models for role in roles]}")
                 print("================\n")
-                
                 # 将角色列表存储为用户的属性
                 setattr(user, '_roles_cache', roles)
-                
                 # 修改原有的roles.all方法
                 original_roles = user.roles
                 
@@ -912,9 +962,9 @@ class AdminSite:
         """注册菜项"""
         self.menu_manager.register_menu(menu_item)  # 使用 menu_manager 注册菜单
 
-    def get_model_admin(self, model_name: str) -> Optional[ModelAdmin]:
-        """获取模型管理器"""
-        return self.models.get(model_name)
+    def get_model_admin(self, route_id: str) -> Optional[ModelAdmin]:
+        """根据路由ID获取模型管理器"""
+        return self.models.get(route_id)
 
     async def check_permission(self, request: Request, model_name: str, action: str) -> bool:
         """检查权限"""

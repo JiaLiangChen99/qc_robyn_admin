@@ -76,7 +76,7 @@
             inline_model: options.model
         });
         
-        fetch(`/admin/${options.parentModel}/inline_data?${params}`)
+        fetch(`/admin/${options.route_id}/inline_data?${params}`)
             .then(response => response.json())
             .then(result => {
                 if (result.success) {
@@ -216,7 +216,7 @@
 
     // 编辑记录
     window.editInlineRecord = function(model, id) {
-        fetch(`/admin/${model}/${id}`)
+        fetch(`/admin/${window.serverConfig.route_id}/${id}`)
             .then(response => response.json())
             .then(data => {
                 showFormModal('edit', data);
@@ -230,7 +230,7 @@
     // 删除记录
     window.deleteInlineRecord = function(model, id) {
         if (confirm('确定要删除这条记录吗？')) {
-            fetch(`/admin/${model}/${id}/delete`, {
+            fetch(`/admin/${window.serverConfig.route_id}/${id}/delete`, {
                 method: 'POST'
             })
             .then(response => {

@@ -150,14 +150,14 @@
         </div>
     </nav>
 
-    <div class="container-fluid">
+    <div class="container-fluid", style="margin-top: 50px;">
         <div class="row">
             {% if user is defined and user %}
             <nav id="sidebar" class="col-md-3 col-lg-2 d-md-block bg-dark sidebar collapse">
                 <div class="sidebar-sticky">
                     {% if models is defined %}
                     {# 添加系统管理菜单组 #}
-                    {% if 'AdminUser' in models or 'Role' in models or 'UserRole' in models %}
+                    {% if 'AdminUserAdmin' in models or 'RoleAdmin' in models or 'UserRoleAdmin' in models %}
                     <div class="nav-group">
                         <a class="nav-link nav-group-toggle" data-bs-toggle="collapse" 
                            href="#menu-system" role="button"
@@ -169,28 +169,28 @@
                         </a>
                         <div class="collapse show" id="menu-system">
                             <ul class="nav flex-column">
-                                {% if 'AdminUser' in models %}
+                                {% if 'AdminUserAdmin' in models %}
                                 <li class="nav-item">
                                     <a class="nav-link" 
-                                       href="/admin/AdminUser">
+                                       href="/admin/AdminUserAdmin">
                                         <i class="bi bi-people"></i>
                                         {{ get_text('user_management', language) }}
                                     </a>
                                 </li>
                                 {% endif %}
-                                {% if 'Role' in models %}
+                                {% if 'RoleAdmin' in models %}
                                 <li class="nav-item">
                                     <a class="nav-link" 
-                                       href="/admin/Role">
+                                       href="/admin/RoleAdmin">
                                         <i class="bi bi-person-badge"></i>
                                         {{ get_text('role_management', language) }}
                                     </a>
                                 </li>
                                 {% endif %}
-                                {% if 'UserRole' in models %}
+                                {% if 'UserRoleAdmin' in models %}
                                 <li class="nav-item">
                                     <a class="nav-link" 
-                                       href="/admin/UserRole">
+                                       href="/admin/UserRoleAdmin">
                                         <i class="bi bi-person-badge"></i>
                                         {{ get_text('user_role_management', language) }}
                                     </a>
@@ -230,7 +230,7 @@
                                         {% for model_name, model_admin in items|sort(attribute='1.menu_order') %}
                                         <li class="nav-item">
                                             <a class="nav-link{% if model_name == current_model %} active{% endif %}" 
-                                               href="/admin/{{ model_name }}">
+                                               href="/admin/{{ model_admin.route_id }}">
                                                 <i class="{{ model_admin.menu_icon }}"></i>
                                                 {{ model_admin.verbose_name }}
                                             </a>

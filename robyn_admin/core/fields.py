@@ -25,6 +25,7 @@ class DisplayType(Enum):
     PASSWORD = 'password'
     EMAIL = 'email'
     SELECT = 'select'
+    SWITCH = 'switch'
     
 @dataclass
 class TableAction:
@@ -38,19 +39,21 @@ class TableAction:
 @dataclass
 class TableField:
     """表格字段配置"""
-    name: str                    # 字段名称
-    label: Optional[str] = None  # 显示标签
+    name: str                    
+    label: Optional[str] = None  
     display_type: Optional[DisplayType] = None
     sortable: bool = False
     searchable: bool = False
     filterable: bool = False
-    editable: bool = False
+    editable: bool = True
     readonly: bool = False
     visible: bool = True
     is_link: bool = False
     width: Optional[Union[int, str]] = None
     formatter: Optional[Callable] = None
     hidden: bool = False
+    choices: Optional[Dict[Any, Any]] = None  # 实际值映射
+    labels: Optional[Dict[Any, str]] = None   # 显示文本映射
     
     # 关联字段配置
     related_model: Optional[Type[Model]] = None  # 关联的模型
@@ -133,7 +136,9 @@ class TableField:
             'is_link': self.is_link,
             'width': self.width,
             'hidden': self.hidden,
-            'has_formatter': bool(self.formatter)
+            'has_formatter': bool(self.formatter),
+            'choices': self.choices,
+            'labels': self.labels  # 添加显示文本映射
         }
         
         if self.related_model and self.related_key:
@@ -178,7 +183,6 @@ class FormField:
         return value
     
     def to_dict(self) -> dict:
-        """转换为字典，用于JSON序列化"""
         return {
             'name': self.name,
             'label': self.label,
@@ -199,43 +203,45 @@ class FormField:
     
 @dataclass
 class SearchField:
-    """搜索字段配置"""
-    name: str                    # 字段名称，格式应该是 "模型类_字段名"
+    """search field config
+    
+    name: str  if not related_model, name format is "field" else "RelatedModel_field"
+
+    label: str
+
+
+    """
+    name: str                    #
     label: Optional[str] = None
     placeholder: str = ""
     operator: str = 'icontains'
     
-    # 保持与 TableField 一致的关联字段支持
-    related_model: Optional[Type[Model]] = None  # 关联的模型
-    related_key: Optional[str] = None           # 外键字段名
+    # relate modal
+    related_model: Optional[Type[Model]] = None  # relate modal
+    related_key: Optional[str] = None           # relate key  
     
     def __post_init__(self):
         if self.label is None:
             self.label = self.name.replace('_', ' ').title()
         if not self.placeholder:
-            self.placeholder = f"输入{self.label}搜索"
+            self.placeholder = f"{self.label}"
             
     def to_dict(self) -> dict:
-        """转换为字典，用于JSON序列化"""
         data = {
             'name': self.name,
             'label': self.label,
             'placeholder': self.placeholder,
             'operator': self.operator
         }
-        
         if self.related_model:
             data.update({
                 'related_model': self.related_model.__name__,
             })
-            
         return data
 
     async def build_search_query(self, search_value: str) -> dict:
-        """构建搜索查询条件"""
         if not search_value:
             return {}
-            
         if self.related_model and self.related_key:
             # 从字段名中解析要搜索的关联字段
             model_name = self.related_model.__name__
@@ -248,20 +254,17 @@ class SearchField:
                         **{f"{related_field}__icontains": search_value}
                     )
                     if not related_objects:
-                        return {"id": None}
-                        
+                        return {"id": None}   
                     # 构建 OR 条件列表
                     conditions = [
                         Q(**{f"{self.related_key}": str(obj.id)})
                         for obj in related_objects
-                    ]
-                    
+                    ] 
                     if conditions:
                         # 返回组合的Q对象
                         combined_q = reduce(operator.or_, conditions)
                         return {"_q_object": combined_q}
                     return {"id": None}
-                    
                 except Exception as e:
                     print(f"Error in related search: {str(e)}")
                     return {"id": None}
