@@ -26,6 +26,7 @@ class DisplayType(Enum):
     EMAIL = 'email'
     SELECT = 'select'
     SWITCH = 'switch'
+    JSON = 'json'
     
 @dataclass
 class TableAction:

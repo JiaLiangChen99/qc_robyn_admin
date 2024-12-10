@@ -1,19 +1,17 @@
 {% extends "admin/base.html" %}
 
 {% block content %}
-<div class="container" style="margin: 50px;">
+<div class="container-fluid">
     <div class="row">
-        <div class="col-12">
+        <div class="col">
             <h1>{{ get_text('welcome', language) }}</h1>
             <p>{{ get_text('home', language) }}</p>
-            
             <div class="list-group">
                 {% for model_name, model_admin in models.items() %}
                 <a href="/admin/{{ model_name }}" class="list-group-item list-group-item-action">
                     {{ model_name }}
                 </a>
                 {% endfor %}
-            </div>
         </div>
     </div>
 </div>

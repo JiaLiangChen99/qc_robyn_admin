@@ -8,16 +8,31 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-table@1.22.1/dist/bootstrap-table.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
     <style>
+        body {
+            padding-top: 56px;  /* 为固定顶部导航栏留出空间 */
+        }
+        
+        .wrapper {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        
+        .container-fluid {
+            flex: 1;
+            padding-top: 1rem;
+        }
+        
         /* 侧边栏样式 */
         .sidebar {
-            position: fixed;
-            top: 0;
-            bottom: 0;
-            left: 0;
+            position: sticky;
+            top: 56px;  /* 与顶部导航栏对齐 */
+            height: calc(100vh - 56px);
+            padding-top: 1rem;
+            overflow-x: hidden;
+            overflow-y: auto;
+            background-color: #343a40;
             z-index: 100;
-            padding: 48px 0 0;
-            background-color: #343a40;  /* 深色背景 */
-            box-shadow: inset -1px 0 0 rgba(0, 0, 0, .1);
         }
         
         .sidebar-sticky {
@@ -35,7 +50,7 @@
         }
 
         .nav-group-toggle {
-            color: rgba(255, 255, 255, 0.8) !important;  /* 白色文字 */
+            color: rgba(255, 255, 255, 0.8) !important;
             padding: 0.5rem 1rem;
             display: flex;
             align-items: center;
@@ -51,7 +66,7 @@
         }
 
         .nav-group-toggle::after {
-            content: '\F282';  /* Bootstrap Icons 箭头图标 */
+            content: '\F282';
             font-family: 'bootstrap-icons';
             transition: transform 0.3s;
         }
@@ -63,7 +78,7 @@
         /* 子菜单样式 */
         .nav-group .nav-item .nav-link {
             color: rgba(255, 255, 255, 0.6);
-            padding: 0.5rem 1rem 0.5rem 2.5rem;  /* 增加左边距 */
+            padding: 0.5rem 1rem 0.5rem 2.5rem;
             font-size: 0.9rem;
             transition: all 0.3s;
         }
@@ -82,12 +97,8 @@
         .nav-link i {
             margin-right: 0.5rem;
             font-size: 1.1rem;
-            width: 1.5rem;  /* 固定图标宽度 */
+            width: 1.5rem;
             text-align: center;
-        }
-        
-        main {
-            padding-top: 48px;
         }
 
         /* 自定义滚动条 */
@@ -107,149 +118,57 @@
         .sidebar-sticky::-webkit-scrollbar-thumb:hover {
             background-color: rgba(255, 255, 255, 0.4);
         }
+
+        /* 页脚样式 */
+        .footer {
+            padding: 1rem 0;
+            background: #f8f9fa;
+            border-top: 1px solid #dee2e6;
+            margin-top: auto;
+        }
+
+        /* 内容区域样式 */
+        .main-content {
+            padding: 1rem 0;
+        }
     </style>
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+    <div class="wrapper">
+        {% if user %}
+            {% include "admin/components/header.html" %}
+        {% endif %}
+        
         <div class="container-fluid">
-            <a class="navbar-brand" href="/admin">{{ site_title }}</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="/admin">{{ 'Home' if language == 'en_US' else '主页' }}</a>
-                    </li>
-                </ul>
-                <ul class="navbar-nav">
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="languageDropdown" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-globe"></i>
-                            {{ 'English' if language == 'en_US' else '中文' }}
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="#" onclick="setLanguage('zh_CN')">中文</a></li>
-                            <li><a class="dropdown-item" href="#" onclick="setLanguage('en_US')">English</a></li>
-                        </ul>
-                    </li>
-                    {% if user %}
-                    <li class="nav-item">
-                        <span class="nav-link">{{ get_text('welcome', language) }}, {{ user.username }}</span>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/admin/logout">{{ get_text('logout', language) }}</a>
-                    </li>
-                    {% else %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="/admin/login">{{ get_text('login', language) }}</a>
-                    </li>
-                    {% endif %}
-                </ul>
+            <div class="row">
+                {% if user %}
+                    <div class="col-md-3 col-lg-2 px-0">
+                        {% include "admin/components/sidebar.html" %}
+                    </div>
+                    <div class="col-md-9 col-lg-10 px-md-4 main-content">
+                        {% block content %}{% endblock %}
+                    </div>
+                {% else %}
+                    <div class="col-12 main-content">
+                        {{ self.content() }}
+                    </div>
+                {% endif %}
             </div>
         </div>
-    </nav>
-
-    <div class="container-fluid", style="margin-top: 50px;">
-        <div class="row">
-            {% if user is defined and user %}
-            <nav id="sidebar" class="col-md-3 col-lg-2 d-md-block bg-dark sidebar collapse">
-                <div class="sidebar-sticky">
-                    {% if models is defined %}
-                    {# 添加系统管理菜单组 #}
-                    {% if 'AdminUserAdmin' in models or 'RoleAdmin' in models or 'UserRoleAdmin' in models %}
-                    <div class="nav-group">
-                        <a class="nav-link nav-group-toggle" data-bs-toggle="collapse" 
-                           href="#menu-system" role="button"
-                           aria-expanded="true">
-                            <span>
-                                <i class="bi bi-gear"></i>
-                                {{ get_text('system_management', language) }}
-                            </span>
-                        </a>
-                        <div class="collapse show" id="menu-system">
-                            <ul class="nav flex-column">
-                                {% if 'AdminUserAdmin' in models %}
-                                <li class="nav-item">
-                                    <a class="nav-link" 
-                                       href="/admin/AdminUserAdmin">
-                                        <i class="bi bi-people"></i>
-                                        {{ get_text('user_management', language) }}
-                                    </a>
-                                </li>
-                                {% endif %}
-                                {% if 'RoleAdmin' in models %}
-                                <li class="nav-item">
-                                    <a class="nav-link" 
-                                       href="/admin/RoleAdmin">
-                                        <i class="bi bi-person-badge"></i>
-                                        {{ get_text('role_management', language) }}
-                                    </a>
-                                </li>
-                                {% endif %}
-                                {% if 'UserRoleAdmin' in models %}
-                                <li class="nav-item">
-                                    <a class="nav-link" 
-                                       href="/admin/UserRoleAdmin">
-                                        <i class="bi bi-person-badge"></i>
-                                        {{ get_text('user_role_management', language) }}
-                                    </a>
-                                </li>
-                                {% endif %}
-                            </ul>
-                        </div>
+        
+        {% if copyright %}
+        <footer class="footer">
+            <div class="container-fluid">
+                <div class="row text-muted">
+                    <div class="col-12 text-center">
+                        <p class="mb-0">
+                            {{ copyright }}
+                        </p>
                     </div>
-                    {% endif %}
-
-                    {# 其他业务菜单组 #}
-                    {% set menu_groups = {} %}
-                    {% for model_name, model_admin in models.items() %}
-                        {% if model_admin.menu_group not in menu_groups and model_admin.menu_group != '系统管理' %}
-                            {% set _ = menu_groups.update({model_admin.menu_group: []}) %}
-                        {% endif %}
-                        {% if model_admin.menu_group != '系统管理' %}
-                            {% set _ = menu_groups[model_admin.menu_group].append((model_name, model_admin)) %}
-                        {% endif %}
-                    {% endfor %}
-                    
-                    {# 渲染业务菜单组 #}
-                    {% for group_name, items in menu_groups.items()|sort(attribute='0') %}
-                        {% if items|length > 0 %}  {# 只显示有权限访问的模型所在的菜单组 #}
-                            {% set menu_item = menus.get(group_name, {'icon': 'bi bi-folder'}) %}
-                            <div class="nav-group">
-                                <a class="nav-link nav-group-toggle" data-bs-toggle="collapse" 
-                                   href="#menu-{{ group_name|lower|replace(' ', '-') }}" role="button"
-                                   aria-expanded="true">
-                                    <span>
-                                        <i class="{{ menu_item.icon }}"></i>
-                                        {{ group_name }}
-                                    </span>
-                                </a>
-                                <div class="collapse show" id="menu-{{ group_name|lower|replace(' ', '-') }}">
-                                    <ul class="nav flex-column">
-                                        {% for model_name, model_admin in items|sort(attribute='1.menu_order') %}
-                                        <li class="nav-item">
-                                            <a class="nav-link{% if model_name == current_model %} active{% endif %}" 
-                                               href="/admin/{{ model_admin.route_id }}">
-                                                <i class="{{ model_admin.menu_icon }}"></i>
-                                                {{ model_admin.verbose_name }}
-                                            </a>
-                                        </li>
-                                        {% endfor %}
-                                    </ul>
-                                </div>
-                            </div>
-                        {% endif %}
-                    {% endfor %}
-                    {% endif %}
                 </div>
-            </nav>
-            {% endif %}
-
-            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
-                {% block content %}{% endblock %}
-            </main>
-        </div>
+            </div>
+        </footer>
+        {% endif %}
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.8/dist/umd/popper.min.js"></script>

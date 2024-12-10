@@ -22,7 +22,9 @@ class AdminUserAdmin(ModelAdmin):
     add_form_fields = [
         FormField("username", label="用户名", required=True),
         FormField("email", label="邮箱"),
-        FormField("password", label="密码", field_type=DisplayType.PASSWORD, processor=lambda x: AdminUser.hash_password(x)),
+        FormField("password", label="密码",
+                field_type=DisplayType.PASSWORD,
+                processor=lambda x: AdminUser.hash_password(x)),
         FormField("is_active", label="是否启用", field_type=DisplayType.BOOLEAN),
         FormField("is_superuser", label="是否为超级用户", field_type=DisplayType.BOOLEAN),
     ]
@@ -30,7 +32,9 @@ class AdminUserAdmin(ModelAdmin):
     form_fields = [
         FormField("username", label="用户名", required=True),
         FormField("email", label="邮箱"),
-        FormField("password", label="密码", field_type=DisplayType.PASSWORD, processor=lambda x: AdminUser.hash_password(x)),
+        FormField("password", label="密码",
+                field_type=DisplayType.PASSWORD,
+                processor=lambda x: AdminUser.hash_password(x)),
         FormField("is_active", label="是否启用", field_type=DisplayType.BOOLEAN),
         FormField("is_superuser", label="是否为超级用户", field_type=DisplayType.BOOLEAN),
     ]
@@ -46,20 +50,28 @@ class RoleAdmin(ModelAdmin):
         TableField("id", label="ID", hidden=True),
         TableField("name", label="角色名称", sortable=True),
         TableField("description", label="描述"),
-        TableField("accessible_models", label="角色权限", display_type=DisplayType.DATETIME),
+        TableField("accessible_models", label="角色权限", display_type=DisplayType.JSON),
     ]
     
     add_form_fields = [
         FormField("name", label="角色名称", required=True),
         FormField("description", label="描述"),
-        FormField("accessible_models", label="权限，输入json字符串"),
-    ] 
+        FormField(
+            "accessible_models", 
+            label="权限配置",
+            field_type=DisplayType.JSON,
+        ),
+    ]
 
     form_fields = [
         FormField("name", label="角色名称", required=True),
         FormField("description", label="描述"),
-        FormField("accessible_models", label="权限，输入json字符串"),
-    ] 
+        FormField(
+            "accessible_models", 
+            label="权限配置",
+            field_type=DisplayType.JSON,
+        ),
+    ]
 
 class UserRoleAdmin(ModelAdmin):
     """用户角色关联管理"""

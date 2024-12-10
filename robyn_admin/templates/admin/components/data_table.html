@@ -3,7 +3,7 @@
     {% include "admin/components/filter_panel.html" %}
 {% endif %}
 <div class="card">
-    <div class="card-body">
+    <div class="card-body mb-4">
         <div id="toolbar" class="mb-3"></div>
         <div class="table-responsive">
             <table id="dataTable"></table>
@@ -256,10 +256,53 @@ $(document).ready(function() {
             width: 150,
             formatter: function(value, row) {
                 try {
+                    // 获取完整的行数据
                     const rowData = row.data || row;
                     const id = rowData.id;
-                    const safeData = Object.assign({}, rowData);
-                    delete safeData.display;
+                    
+                    // 创建一个新对象来存储处理后的数据
+                    const safeData = {};
+                    
+                    // 遍历所有字段
+                    Object.keys(rowData).forEach(key => {
+                        if (key === 'display') return; // 跳过 display 字段
+                        
+                        let value = rowData[key];
+                        if (value === null || value === undefined) {
+                            safeData[key] = '';
+                            return;
+                        }
+                        
+                        // 检查是否为 JSON 字段
+                        const field = config.tableFields.find(f => f.name === key);
+                        if (field && field.display_type === 'json') {
+                            // 如果已经是字符串形式，检查是否为有效的 JSON
+                            if (typeof value === 'string') {
+                                try {
+                                    JSON.parse(value); // 验证 JSON 格式
+                                    safeData[key] = value;
+                                } catch (e) {
+                                    safeData[key] = '[]';
+                                }
+                            } else if (Array.isArray(value)) {
+                                // 如果是数组，转换为字符串
+                                safeData[key] = JSON.stringify(value);
+                            } else if (typeof value === 'object') {
+                                // 如果是对象，转换为字符串
+                                safeData[key] = JSON.stringify(value);
+                            } else {
+                                safeData[key] = '[]';
+                            }
+                        } else {
+                            // 非 JSON 字段直接赋值
+                            safeData[key] = value;
+                        }
+                    });
+                    
+                    // 打印处理后的数据用于调试
+                    console.log('Row data for ID ' + id + ':', safeData);
+                    
+                    // 编码数据
                     const encodedData = encodeURIComponent(JSON.stringify(safeData));
                     
                     let buttons = [];
@@ -295,7 +338,7 @@ $(document).ready(function() {
                     return buttons.join(' ');
                 } catch (error) {
                     console.error('Error formatting operation buttons:', error, row);
-                    return '<button class="btn btn-sm btn-warning" disabled>${translations.edit}</button>';
+                    return '<button class="btn btn-sm btn-warning" disabled>编辑</button>';
                 }
             }
         });
@@ -457,7 +500,7 @@ $(document).ready(function() {
             url: `/admin/${config.modelName}/batch_delete`,
             method: 'POST',
             data: { ids: ids },
-            dataType: 'json',  // 指定应类型 JSON
+            dataType: 'json',  // 指定应类�� JSON
             success: function(response) {
                 if (response.success) {
                     // 显示成功提示
@@ -680,7 +723,7 @@ $(document).ready(function() {
             </div>
         `;
         
-        // 移除已存在的��态框
+        // 移除已存在的模态框
         const existingModal = document.getElementById('inlineModal');
         if (existingModal) {
             existingModal.remove();
@@ -740,7 +783,7 @@ $(document).ready(function() {
 
     // 编辑关联记录
     window.editInlineRecord = function(model, id) {
-        // 获��记录数据并显编辑表单
+        // 获取记录数据并显示编辑表单
         fetch(`/admin/${model}/${id}`)
             .then(response => response.json())
             .then(data => {
@@ -822,6 +865,97 @@ window.handleSwitchChange = async function(id, field, switchElement) {
         switchElement.checked = !isChecked;
     }
 };
+
+function handleAction(action, id, rowData) {
+    console.log('Action:', action, 'ID:', id);
+    console.log('Raw row data:', rowData);
+    
+    let row = null;
+    if (rowData && rowData !== 'undefined' && rowData !== 'NaN') {
+        try {
+            // 解析行数据
+            const decodedData = decodeURIComponent(rowData);
+            console.log('Decoded data:', decodedData);
+            
+            row = JSON.parse(decodedData);
+            console.log('Parsed row data:', row);
+            
+            if (!row || typeof row !== 'object') {
+                throw new Error('Invalid row data format');
+            }
+            
+            row.id = id;
+            
+            // 如果是编辑操作，确保 JSON 字段正确处理
+            if (action === 'edit') {
+                const config = window.serverConfig;
+                const jsonFields = config.tableFields
+                    .filter(f => f.display_type === 'json')
+                    .map(f => f.name);
+                
+                console.log('JSON fields:', jsonFields);
+                
+                // 处理所有 JSON 字段
+                for (const fieldName of jsonFields) {
+                    if (row[fieldName] !== undefined) {
+                        try {
+                            // 如果是字符串形式的 JSON，验证并保持原样
+                            if (typeof row[fieldName] === 'string') {
+                                JSON.parse(row[fieldName]); // 验证 JSON 格式
+                            } 
+                            // 如果是对象，转��为字符串
+                            else if (typeof row[fieldName] === 'object') {
+                                row[fieldName] = JSON.stringify(row[fieldName]);
+                            }
+                        } catch (e) {
+                            console.error(`Error processing JSON field ${fieldName}:`, e);
+                            row[fieldName] = '[]';
+                        }
+                    }
+                }
+            }
+            
+            console.log('Final processed row data:', row);
+        } catch (e) {
+            console.error('Error parsing row data:', e);
+            alert('数据格式错误，请刷新页面重试');
+            return;
+        }
+    }
+    
+    switch(action) {
+        case 'edit':
+            if (!id || id === 'undefined') {
+                console.error('Invalid id for edit action');
+                alert('无效的记录ID');
+                return;
+            }
+            if (!row) {
+                console.error('No row data for edit action');
+                alert('无法获取记录数据');
+                return;
+            }
+            $('#formModal').data({
+                currentData: row,
+                action: 'edit',
+                routeId: window.serverConfig.route_id
+            });
+            showFormModal('edit', row);
+            break;
+        case 'delete':
+            if (!id || id === 'undefined') {
+                console.error('Invalid id for delete action');
+                alert('无效的记录ID');
+                return;
+            }
+            if(confirm('确定要删除这条记录吗？')) {
+                deleteRecord(id);
+            }
+            break;
+        default:
+            console.log('Unknown action:', action);
+    }
+}
 </script>
 {% endmacro %}
 

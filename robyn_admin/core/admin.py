@@ -244,7 +244,6 @@ class ModelAdmin:
                 except Exception as e:
                     print(f"Error building filter query for {filter_field.name}: {str(e)}")
                     continue
-        print("final queryset", queryset)
         return queryset
         
     def get_field_label(self, field_name: str) -> str:
@@ -365,6 +364,27 @@ class ModelAdmin:
                 
         return result
 
+    async def process_form_data(self, data):
+        """处理表单数据"""
+        processed_data = {}
+        
+        for field in self.form_fields:
+            if field.name in data:
+                value = data[field.name]
+                
+                # 处理JSON类型字段
+                if field.field_type == DisplayType.JSON:
+                    try:
+                        import json
+                        value = json.loads(value)
+                    except Exception as e:
+                        print(f"JSON解析错误: {str(e)}")
+                        value = None
+                        
+                processed_data[field.name] = value
+                
+        return processed_data
+
     def serialize_field(self, field: TableField) -> Dict[str, Any]:
         return {
             'name': field.name,
@@ -397,7 +417,7 @@ class ModelAdmin:
         """获取前端配置"""
         form_fields = await self.get_form_fields()
         add_form_fields = await self.get_add_form_fields()
-        # 异步获取过滤���段
+        # 异步获取过滤段
         filter_fields = await self.get_filter_fields()
         search_fields = await self.get_search_fields()
         config = {
@@ -511,4 +531,156 @@ class ModelAdmin:
         if hasattr(self, 'add_form_fields'):
             return self.add_form_fields
         return await self.get_form_fields()
+
+    async def handle_edit(self, request: Request, object_id: str, data: dict) -> tuple[bool, str]:
+        """
+        处理编辑操作的钩子方法
+        
+        Args:
+            request: Request对象
+            object_id: 记录ID
+            data: 编辑的数据
+            
+        Returns:
+            tuple[bool, str]: (是否成功, 消息)
+        """
+        try:
+            obj = await self.get_object(object_id)
+            if not obj:
+                return False, "记录不存在"
+                
+            # 处理表单数据
+            processed_data = await self.process_form_data(data)
+            
+            # 更新对象
+            for field, value in processed_data.items():
+                setattr(obj, field, value)
+            await obj.save()
+            
+            return True, "更新成功"
+            
+        except Exception as e:
+            print(f"Edit error: {str(e)}")
+            return False, f"更新失败: {str(e)}"
+
+    async def handle_add(self, request: Request, data: dict) -> tuple[bool, str]:
+        """
+        处理添加操作的钩子方法
+        
+        Args:
+            request: Request对象
+            data: 添加的数据
+            
+        Returns:
+            tuple[bool, str]: (是否成功, 消息)
+        """
+        try:
+            # 处理表单数据
+            processed_data = await self.process_form_data(data)
+            
+            # 创建对象
+            obj = await self.model.create(**processed_data)
+            
+            return True, "创建成功"
+            
+        except Exception as e:
+            print(f"Add error: {str(e)}")
+            return False, f"创建失败: {str(e)}"
+
+    async def handle_delete(self, request: Request, object_id: str) -> tuple[bool, str]:
+        """
+        处理删除操作的钩子方法
+        
+        Args:
+            request: Request对象
+            object_id: 记录ID
+            
+        Returns:
+            tuple[bool, str]: (是否成功, 消息)
+        """
+        try:
+            obj = await self.get_object(object_id)
+            if not obj:
+                return False, "记录不存在"
+            
+            # 执行删除
+            await obj.delete()
+            return True, "删除成功"
+            
+        except Exception as e:
+            print(f"Delete error: {str(e)}")
+            return False, f"删除失败: {str(e)}"
+
+    async def handle_batch_delete(self, request: Request, ids: list) -> tuple[bool, str, int]:
+        """
+        处理批量删除操作的钩子方法
+        
+        Args:
+            request: Request对象
+            ids: 要删除的记录ID列表
+            
+        Returns:
+            tuple[bool, str, int]: (是否成功, 消息, 删除成功数量)
+        """
+        try:
+            deleted_count = 0
+            for id in ids:
+                try:
+                    obj = await self.get_object(id)
+                    if obj:
+                        # 调用单条记录的删除方法保持一致性
+                        success, _ = await self.handle_delete(request, id)
+                        if success:
+                            deleted_count += 1
+                except Exception as e:
+                    print(f"删除记录 {id} 失败: {str(e)}")
+                    continue
+                
+            if deleted_count > 0:
+                return True, f"成功删除 {deleted_count} 条记录", deleted_count
+            return False, "没有记录被删除", 0
+            
+        except Exception as e:
+            print(f"Batch delete error: {str(e)}")
+            return False, f"批量删除失败: {str(e)}", 0
+
+    async def handle_query(self, request: Request, params: dict) -> tuple[QuerySet, int]:
+        """
+        处理数据查询的钩子方法
+        
+        Args:
+            request: Request对象
+            params: 查询参数字典,包含:
+                - limit: 每页记录数
+                - offset: 偏移量
+                - search: 搜索关键字
+                - sort: 排序字段
+                - order: 排序方式(asc/desc)
+                - 其他过滤参数
+                
+        Returns:
+            tuple[QuerySet, int]: (查询结果集, 总记录数)
+        """
+        try:
+            # 获取基础查询集
+            queryset = await self.get_queryset(request, params)
+            
+            # 处理排序
+            if params.get('sort'):
+                order_by = f"{'-' if params['order'] == 'desc' else ''}{params['sort']}"
+                queryset = queryset.order_by(order_by)
+            elif self.default_ordering:
+                queryset = queryset.order_by(*self.default_ordering)
+                
+            # 获取总记录数
+            total = await queryset.count()
+            
+            # 分页
+            queryset = queryset.offset(params['offset']).limit(params['limit'])
+            
+            return queryset, total
+            
+        except Exception as e:
+            print(f"Query error: {str(e)}")
+            return self.model.all(), 0
 

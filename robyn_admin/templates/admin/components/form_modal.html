@@ -51,10 +51,44 @@ function showFormModal(action, data = null) {
     // 生成表单字段
     formFields.forEach(function(field) {
         var fieldHtml = '';
-        var fieldValue = data ? (data[field.name] || '') : '';
+        var fieldValue = '';
+        
+        // 获取字段值
+        if (data && data[field.name] !== undefined) {
+            fieldValue = data[field.name];
+            // 处理 JSON 类型字段
+            if (field.field_type === 'json') {
+                try {
+                    // 如果是字符串，尝试解析后再格式化
+                    if (typeof fieldValue === 'string') {
+                        const parsed = JSON.parse(fieldValue);
+                        fieldValue = JSON.stringify(parsed, null, 2);
+                    }
+                    // 如果是对象，直接格式化
+                    else if (typeof fieldValue === 'object') {
+                        fieldValue = JSON.stringify(fieldValue, null, 2);
+                    }
+                } catch (e) {
+                    console.error('Error formatting JSON:', e);
+                    fieldValue = fieldValue || '';
+                }
+            }
+        }
         
         // 根据字段类型生成不同的表单控件
         switch(field.field_type) {
+            case 'json':
+                fieldHtml = `
+                    <div class="mb-3">
+                        <label class="form-label">${field.label}</label>
+                        <textarea class="form-control" name="${field.name}" 
+                                rows="5" ${field.required ? 'required' : ''}
+                                placeholder="请输入有效的JSON格式">${fieldValue}</textarea>
+                        <small class="form-text text-muted">
+                            请输入有效的JSON格式数据
+                        </small>
+                    </div>`;
+                break;
             case 'select':
                 fieldHtml = `
                     <div class="mb-3">
@@ -127,21 +161,35 @@ function showFormModal(action, data = null) {
 
 // 提交表单
 async function submitForm() {
-    var config = window.serverConfig;
     var form = document.getElementById('modelForm');
     var formData = new FormData(form);
     var data = new URLSearchParams();
     
-    // 收集表单数据
+    // 获取当前操作类型和表单字段配置
+    var modal = $('#formModal');
+    var action = modal.data('action');
+    var config = window.serverConfig;
+    var formFields = action === 'add' ? config.addFormFields : config.formFields;
+    
+    // 处理表单数据
     for(let [key, value] of formData.entries()) {
-        data.append(key, value);
+        const field = formFields.find(f => f.name === key);
+        if (field && field.field_type === 'json') {
+            try {
+                // 验证JSON格式
+                JSON.parse(value);
+                data.append(key, value);
+            } catch (e) {
+                alert('JSON格式无效，请检查输入');
+                return;
+            }
+        } else {
+            data.append(key, value);
+        }
     }
     
     try {
-        // 获取当前操作类型和数据
-        var modal = $('#formModal');
         var currentData = modal.data('currentData');
-        var action = modal.data('action');
         
         console.log('Submit form:', {
             action: action,
@@ -154,7 +202,7 @@ async function submitForm() {
             `/admin/${config.route_id}/${currentData.id}/edit` : 
             `/admin/${config.route_id}/add`;
             
-        console.log('Submit URL:', url); // 添加调试日志
+        console.log('Submit URL:', url);
 
         const response = await fetch(url, {
             method: 'POST',

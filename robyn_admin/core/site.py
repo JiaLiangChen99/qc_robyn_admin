@@ -143,21 +143,16 @@ class AdminSite:
         async def admin_index(request: Request):
             user = await self._get_current_user(request)
             if not user:
-                return Response(status_code=307, headers={"Location": f"/{self.prefix}/login"}, description="user not login")
+                return Response(status_code=307, headers={"Location": f"/{self.prefix}/login"})
             
-            # 过滤用户有权限访问的模型
-            filtered_models = {}
-            for route_id, model_admin in self.models.items():
-                if await self.check_permission(request, route_id, 'view'):
-                    filtered_models[route_id] = model_admin
-            
-            language = await self._get_language(request)  # 获取语言设置
+            language = await self._get_language(request)
             context = {
                 "site_title": self.title,
-                "models": filtered_models,  # 使用过滤后的模型字典
-                "menus": self.menu_manager.get_menu_tree(), # 获取菜单结构展示在左侧
+                "models": self.models,
+                "menus": self.menu_manager.get_menu_tree(),
                 "user": user,
-                "language": language
+                "language": language,
+                "copyright": self.copyright
             }
             return self.jinja_template.render_template("admin/index.html", **context)
             
@@ -219,7 +214,7 @@ class AdminSite:
                 
         @self.app.get(f"/{self.prefix}/logout")
         async def admin_logout(request: Request):
-            # 清除cookie时也需���设置同的属性
+            # 清除cookie时也需���同的属性
             cookie_attrs = [
                 "session=",  # 空值
                 "HttpOnly",
@@ -300,7 +295,7 @@ class AdminSite:
                     return Response(
                         status_code=403, 
                         headers={"Content-Type": "text/html"},
-                        description="没有��限访问此页面"
+                        description="没���权限访问此页面"
                     )
                 
                 # 获取模型管理器实例
@@ -360,7 +355,8 @@ class AdminSite:
                     "current_model": route_id,
                     "verbose_name": model_admin.verbose_name,
                     "frontend_config": frontend_config,
-                    "translations": translations
+                    "translations": translations,
+                    "copyright": self.copyright
                 }
                 print("成功返回页面")
                 return self.jinja_template.render_template("admin/model_list.html", **context)
@@ -380,143 +376,160 @@ class AdminSite:
             """处理添加记录"""
             try:
                 route_id: str = request.path_params.get("route_id")
-                model_admin = self.models.get(route_id)
+                model_admin = self.get_model_admin(route_id)
                 if not model_admin:
-                    return Response(status_code=404, description="模型不存在")
-                
+                    return Response(
+                        status_code=404,
+                        description="模型不存在",
+                        headers={"Content-Type": "text/html"}
+                    )
+                    
                 # 检查权限
                 if not await self.check_permission(request, route_id, 'add'):
-                    return jsonify({"error": "没有添加权限"})
-                
-                # 获取动态表单字段
-                form_fields = await model_admin.get_add_form_fields()
-                
+                    return Response(status_code=403, description="没有添加权限", headers={"Content-Type": "text/html"})
+                    
                 # 解析表单数据
                 data = request.body
                 params = parse_qs(data)
-                form_data = {key: value[0] for key, value in params.items()}
-                
-                # 处理表单数据
-                processed_data = {}
-                for field in form_fields:
-                    if field.name in form_data:
-                        processed_data[field.name] = field.process_value(form_data[field.name])
-                
-                # 创建记录
-                await model_admin.model.create(**processed_data)
-                return jsonify({"success": True})
-            except Exception as e:
-                print(f"Error in model_add_post: {str(e)}")
-                return jsonify({"error": str(e)})
-
-        @self.app.post(f"/{self.prefix}/:route_id/:id/edit")
-        async def model_edit_post(request: Request):
-            """处理编辑记录"""
-            route_id: str = request.path_params.get("route_id")
-            object_id: str = request.path_params.get("id")
-            print("编辑的表单数据", object_id)
-            user = await self._get_current_user(request)
-            if not user:
-                return Response(status_code=303, headers={"Location": f"/{self.prefix}/login"})
-            
-            model_admin = self.models.get(route_id)
-            if not model_admin:
-                return Response(status_code=404, description="model not found")
-            
-            if not model_admin.enable_edit:
-                return Response(status_code=403, description="model not allow edit")
-            
-            try:
-                # 检查权限
-                if not await self.check_permission(request, route_id, 'edit'):
-                    return Response(status_code=403, description="do not have edit permission")
-                
-                # 获取要编辑的对象
-                obj = await model_admin.get_object(object_id)
-                if not obj:
-                    return Response(status_code=404, description="record not found")
-                
-                # 解析表单数
-                data = request.body
-                print("form data", data)
-                params = parse_qs(data)
-                # 进行反序列化判断
                 form_data = {}
                 for key, value in params.items():
                     try:
                         form_data[key] = json.loads(value[0])
                     except:
-                        form_data[key] = value[0]   
-                # 处理表数
-                processed_data = {}
-                for field in model_admin.form_fields:
-                    if field.name in form_data:
-                        processed_data[field.name] = field.process_value(form_data[field.name])
+                        form_data[key] = value[0]
+                        
+                # 调用模型管理类的处理方法
+                success, message = await model_admin.handle_add(request, form_data)
                 
-                # 更新对象
-                for field, value in processed_data.items():
-                    print("value type", type(value))
-                    print(f"更新字段: {field} = {value}")
-                    setattr(obj, field, value)
-                await obj.save()
-                
-                return Response(
-                    status_code=200,
-                    description="update success",
-                    headers={"Content-Type": "application/json"}
-                )
-                
+                if success:
+                    return Response(
+                        status_code=200,
+                        description=message,
+                        headers={"Content-Type": "text/html"}
+                    )
+                else:
+                    return Response(
+                        status_code=400,
+                        description=message,
+                        headers={"Content-Type": "text/html"}
+                    )
+                    
             except Exception as e:
-                print(f"编辑失: {str(e)}")
+                print(f"Add error: {str(e)}")
                 return Response(
-                    status_code=400,
-                    description=f"edit failed: {str(e)}",
-                    headers={"Content-Type": "application/json"}
+                    status_code=500,
+                    description=f"添加失败: {str(e)}",
+                    headers={"Content-Type": "text/html"}
+                )
+
+        @self.app.post(f"/{self.prefix}/:route_id/:id/edit")
+        async def model_edit_post(request: Request):
+            """处理编辑记录"""
+            try:
+                route_id: str = request.path_params.get("route_id")
+                object_id: str = request.path_params.get("id")
+                
+                model_admin = self.get_model_admin(route_id)
+                if not model_admin:
+                    return Response(
+                        status_code=404,
+                        description="模型不存在",
+                        headers={"Content-Type": "text/html"}
+                    )
+                if not model_admin.enable_edit:
+                    return Response(
+                        status_code=403, 
+                        description="model not allow edit", 
+                        headers={"Content-Type": "text/html"}
+                    )
+                if not await self.check_permission(request, route_id, 'edit'):
+                    return Response(status_code=403, description="do not have edit permission")
+            
+                # 解析表单数据
+                data = request.body
+                params = parse_qs(data)
+                form_data = {}
+                for key, value in params.items(): 
+                    try:
+                        form_data[key] = json.loads(value[0])
+                    except Exception as e:
+                        form_data[key] = value[0]
+                
+                # 调用模型管理类的处理方法
+                success, message = await model_admin.handle_edit(request, object_id, form_data)
+                
+                if success:
+                    return Response(
+                        status_code=200,
+                        description=message,
+                        headers={"Content-Type": "text/html"}
+                    )
+                else:
+                    return Response(
+                        status_code=400,
+                        description=message,
+                        headers={"Content-Type": "text/html"}
+                    )
+                    
+            except Exception as e:
+                print(f"Edit error: {str(e)}")
+                return Response(
+                    status_code=500,
+                    description=f"编辑失败: {str(e)}",
+                    headers={"Content-Type": "text/html"}
                 )
 
         @self.app.post(f"/{self.prefix}/:route_id/:id/delete")
         async def model_delete(request: Request):
             """处理删除记录"""
-            route_id: str = request.path_params.get("route_id")
-            object_id: str = request.path_params.get("id")
-            
-            user = await self._get_current_user(request)
-            if not user:
-                return Response(status_code=401, description="未登录", headers={"Location": f"/{self.prefix}/login"})
-            
-            model_admin = self.models.get(route_id)
-            if not model_admin:
-                return Response(status_code=404, description="模型不存在", headers={"Location": f"/{self.prefix}/login"})
-            
             try:
+                route_id: str = request.path_params.get("route_id")
+                object_id: str = request.path_params.get("id")
+                user = await self._get_current_user(request)
+                if not user:
+                    return Response(status_code=401, description="未登录", headers={"Location": f"/{self.prefix}/login"})
+                
+                model_admin = self.get_model_admin(route_id)
+                if not model_admin:
+                    return Response(status_code=404, description="模型不存在", headers={"Content-Type": "text/html"})
+                    
                 # 检查权限
                 if not await self.check_permission(request, route_id, 'delete'):
-                    return Response(status_code=403, description="没有删除权限")
+                    return Response(status_code=403, description="���有删除权限", headers={"Content-Type": "text/html"})
+                    
+                # 调用模型管理类的处理方法
+                success, message = await model_admin.handle_delete(request, object_id)
                 
-                # 获取要删除的对象
-                obj = await model_admin.get_object(object_id)
-                if not obj:
-                    return Response(status_code=404, description="记录不存在", headers={"Location": f"/{self.prefix}/{route_id}"})
-                
-                # 删除对象
-                await obj.delete()
-                
-                return Response(status_code=200, description="删除成功", headers={"Location": f"/{self.prefix}/{route_id}"})
+                if success:
+                    return Response(
+                        status_code=200,
+                        description=message,
+                        headers={"Location": f"/{self.prefix}/{route_id}"}
+                    )
+                else:
+                    return Response(
+                        status_code=400,
+                        description=message,
+                        headers={"Content-Type": "text/html"}
+                    )
+                    
             except Exception as e:
-                print(f"除失败: {str(e)}")
-                return Response(status_code=500, description=f"删除失败: {str(e)}", headers={"Location": f"/{self.prefix}/{route_id}"}  )
+                print(f"Delete error: {str(e)}")
+                return Response(
+                    status_code=500,
+                    description=f"删除失败: {str(e)}",
+                    headers={"Content-Type": "text/html"}
+                )
         
         @self.app.get(f"/{self.prefix}/:route_id/data")
         async def model_data(request: Request):
             """获取模型数据"""
             try:
                 route_id: str = request.path_params.get("route_id")
-                print(f"Handling data request for model: {route_id}")
                 model_admin = self.get_model_admin(route_id)
                 if not model_admin:
-                    print(f"Model admin not found for: {route_id}")
-                    print(f"Available models: {list(self.models.keys())}")
                     return jsonify({"error": "Model not found"})
+                    
                 # 解析查询参数
                 params: dict = request.query_params.to_dict()
                 query_params = {
@@ -530,24 +543,12 @@ class AdminSite:
                 # 添加其他过滤参数
                 for key, value in params.items():
                     if key not in ['limit', 'offset', 'search', 'sort', 'order', '_']:
-                        query_params[key] = value[0]                
-                # 获取查询集
-                base_queryset = await model_admin.get_queryset(request, query_params)
+                        query_params[key] = value[0]
+                        
+                # 调用模型管理类的处理方法
+                queryset, total = await model_admin.handle_query(request, query_params)
                 
-                # 处理排序
-                if query_params['sort']:
-                    order_by = f"{'-' if query_params['order'] == 'desc' else ''}{query_params['sort']}"
-                    base_queryset = base_queryset.order_by(order_by)
-                elif model_admin.default_ordering:
-                    base_queryset = base_queryset.order_by(*model_admin.default_ordering)
-                    
-                # 获取总记录数
-                total = await base_queryset.count()
-                
-                # 分页
-                queryset = base_queryset.offset(query_params['offset']).limit(query_params['limit'])
-                
-                # 列化数据
+                # 序列化数据
                 data = []
                 async for obj in queryset:
                     try:
@@ -567,7 +568,6 @@ class AdminSite:
                 
             except Exception as e:
                 print(f"Error in model_data: {str(e)}")
-                traceback.print_exc()
                 return jsonify({"error": str(e)})
         
         @self.app.post(f"/{self.prefix}/:route_id/batch_delete")
@@ -579,44 +579,34 @@ class AdminSite:
                 if not user:
                     return Response(status_code=401, description="未登录", headers={"Location": f"/{self.prefix}/login"})
                 
-                model_admin = self.models.get(route_id)
+                model_admin = self.get_model_admin(route_id)
                 if not model_admin:
-                    return Response(status_code=404, description="型不存在", headers={"Location": f"/{self.prefix}/login"})
+                    return Response(status_code=404, description="模型不存在", headers={"Content-Type": "text/html"})
                 
                 # 解析请求数据
                 data = request.body
                 params = parse_qs(data)
-                ids = params.get('ids[]', [])  # 获取要除的ID列表
+                ids = params.get('ids[]', [])  # 获取要删除的ID列表
                 
                 if not ids:
                     return Response(
                         status_code=400,
                         description="未选择要删除的记录",
-                        headers={"Content-Type": "application/json"}
+                        headers={"Content-Type": "text/html"}
                     )
                 
-                # 批量除
-                deleted_count = 0
-                for id in ids:
-                    try:
-                        obj = await model_admin.get_object(id)
-                        if obj:
-                            await obj.delete()
-                            deleted_count += 1
-                    except Exception as e:
-                        print(f"删除记录 {id} 失败: {str(e)}")
+                # 调用模型管理类的处理方法
+                success, message, deleted_count = await model_admin.handle_batch_delete(request, ids)
                 
-                print(f"除成功 {deleted_count} 条记录")
-                # 修改返回格式
                 return jsonify({
-                    "code": 200,
-                    "message": f"成功删除 {deleted_count} 条记录",
-                    "success": True
+                    "code": 200 if success else 500,
+                    "message": message,
+                    "success": success,
+                    "data": {"deleted_count": deleted_count}
                 })
                 
             except Exception as e:
-                print(f"批量删除失败: {str(e)}")
-                # 修改错误返回格式
+                print(f"Batch delete error: {str(e)}")
                 return jsonify({
                     "code": 500,
                     "message": f"批量删除失败: {str(e)}",
@@ -644,16 +634,16 @@ class AdminSite:
                         "message": "没上传文件",
                         "success": False
                     })
-                # 获取上传路��数
+                # 获取上传路数
                 upload_path = request.form_data.get('upload_path', 'static/uploads')
                 # 处理上传的文件
                 uploaded_files = []
                 for file_name, file_bytes in files.items():
-                    # 验证文件类型
+                    # 证文件类型
                     if not file_name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
                         return jsonify({
                             "code": 400,
-                            "message": "不支文类型，支持jpgjpeg、png、gif格式",
+                            "message": "不支持文件类型，支持jpgjpeg、png、gif格式",
                             "success": False
                         })
 
@@ -669,7 +659,7 @@ class AdminSite:
                     with open(file_path, 'wb') as f:
                         f.write(file_bytes)
                     
-                    # 成访问URL（使用相对路径）
+                    # 生成访问URL（使用相对路径）
                     file_url = f"/{file_path.replace(os.sep, '/')}"
                     uploaded_files.append({
                         "original_name": file_name,
@@ -682,7 +672,7 @@ class AdminSite:
                     "code": 200,
                     "message": "上传成功",
                     "success": True,
-                    "data": uploaded_files[0] if uploaded_files else None  # 回一个文件的信息
+                    "data": uploaded_files[0] if uploaded_files else None  # 返回一个文件的信息
                 })
                 
             except Exception as e:
@@ -690,7 +680,7 @@ class AdminSite:
                 traceback.print_exc()
                 return jsonify({
                     "code": 500,
-                    "message": f"文件上传败: {str(e)}",
+                    "message": f"文件上传失败: {str(e)}",
                     "success": False
                 })
         
@@ -825,7 +815,7 @@ class AdminSite:
                 )
         
     def register_model(self, model: Type[Model], admin_class: Optional[Type[ModelAdmin]] = None):
-        """注册模型到admin站点"""
+        """注册模型���admin站点"""
         if admin_class is None:
             admin_class = ModelAdmin
             
