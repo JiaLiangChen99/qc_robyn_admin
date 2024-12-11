@@ -7,9 +7,6 @@ venv/
 .idea/
 .vscode/
 *.log
-dist/
-build/
-*.egg-info/
 templates/
 example/
 static/
@@ -22,3 +19,16 @@ main.py
 main2.py
 models.py
 project.md
+
+# 打包相关
+# *.egg
+# *.egg-info
+# dist/
+# build/
+# eggs/
+# parts/
+# bin/
+# var/
+# sdist/
+# develop-eggs/
+# .installed.cfg
