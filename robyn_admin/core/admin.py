@@ -367,21 +367,10 @@ class ModelAdmin:
     async def process_form_data(self, data):
         """处理表单数据"""
         processed_data = {}
-        
-        for field in self.form_fields:
-            if field.name in data:
-                value = data[field.name]
-                
-                # 处理JSON类型字段
-                if field.field_type == DisplayType.JSON:
-                    try:
-                        import json
-                        value = json.loads(value)
-                    except Exception as e:
-                        print(f"JSON解析错误: {str(e)}")
-                        value = None
-                        
-                processed_data[field.name] = value
+        form_filds = await self.get_add_form_fields()
+        for field in form_filds:
+            if field.name in data: 
+                processed_data[field.name] = field.process_value(data[field.name])
                 
         return processed_data
 
@@ -548,17 +537,13 @@ class ModelAdmin:
             obj = await self.get_object(object_id)
             if not obj:
                 return False, "记录不存在"
-                
             # 处理表单数据
             processed_data = await self.process_form_data(data)
-            
             # 更新对象
             for field, value in processed_data.items():
                 setattr(obj, field, value)
             await obj.save()
-            
             return True, "更新成功"
-            
         except Exception as e:
             print(f"Edit error: {str(e)}")
             return False, f"更新失败: {str(e)}"
@@ -639,7 +624,6 @@ class ModelAdmin:
             if deleted_count > 0:
                 return True, f"成功删除 {deleted_count} 条记录", deleted_count
             return False, "没有记录被删除", 0
-            
         except Exception as e:
             print(f"Batch delete error: {str(e)}")
             return False, f"批量删除失败: {str(e)}", 0
@@ -671,13 +655,10 @@ class ModelAdmin:
                 queryset = queryset.order_by(order_by)
             elif self.default_ordering:
                 queryset = queryset.order_by(*self.default_ordering)
-                
             # 获取总记录数
             total = await queryset.count()
-            
             # 分页
             queryset = queryset.offset(params['offset']).limit(params['limit'])
-            
             return queryset, total
             
         except Exception as e:

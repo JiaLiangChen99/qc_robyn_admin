@@ -146,9 +146,16 @@ class AdminSite:
                 return Response(status_code=307, headers={"Location": f"/{self.prefix}/login"})
             
             language = await self._get_language(request)
+            
+            # 过滤用户有权限访问的模型
+            filtered_models = {}
+            for route_id, model_admin in self.models.items():
+                if await self.check_permission(request, route_id, 'view'):
+                    filtered_models[route_id] = model_admin
+            
             context = {
                 "site_title": self.title,
-                "models": self.models,
+                "models": filtered_models,
                 "menus": self.menu_manager.get_menu_tree(),
                 "user": user,
                 "language": language,
@@ -214,7 +221,7 @@ class AdminSite:
                 
         @self.app.get(f"/{self.prefix}/logout")
         async def admin_logout(request: Request):
-            # 清除cookie时也需���同的属性
+            # 清除cookie时也需同的属性
             cookie_attrs = [
                 "session=",  # 空值
                 "HttpOnly",
@@ -295,7 +302,7 @@ class AdminSite:
                     return Response(
                         status_code=403, 
                         headers={"Content-Type": "text/html"},
-                        description="没���权限访问此页面"
+                        description="没有权限访问此页面"
                     )
                 
                 # 获取模型管理器实例
@@ -387,17 +394,17 @@ class AdminSite:
                 # 检查权限
                 if not await self.check_permission(request, route_id, 'add'):
                     return Response(status_code=403, description="没有添加权限", headers={"Content-Type": "text/html"})
-                    
+                form_fields = await model_admin.get_add_form_fields()
                 # 解析表单数据
                 data = request.body
                 params = parse_qs(data)
                 form_data = {}
+                
                 for key, value in params.items():
                     try:
                         form_data[key] = json.loads(value[0])
                     except:
                         form_data[key] = value[0]
-                        
                 # 调用模型管理类的处理方法
                 success, message = await model_admin.handle_add(request, form_data)
                 
@@ -495,7 +502,7 @@ class AdminSite:
                     
                 # 检查权限
                 if not await self.check_permission(request, route_id, 'delete'):
-                    return Response(status_code=403, description="���有删除权限", headers={"Content-Type": "text/html"})
+                    return Response(status_code=403, description="没有删除权限", headers={"Content-Type": "text/html"})
                     
                 # 调用模型管理类的处理方法
                 success, message = await model_admin.handle_delete(request, object_id)
@@ -815,7 +822,7 @@ class AdminSite:
                 )
         
     def register_model(self, model: Type[Model], admin_class: Optional[Type[ModelAdmin]] = None):
-        """注册模型���admin站点"""
+        """注册模型admin站点"""
         if admin_class is None:
             admin_class = ModelAdmin
             
@@ -850,7 +857,7 @@ class AdminSite:
         self.model_registry[model.__name__].append(instance)
 
     async def _get_current_user(self, request: Request) -> Optional[AdminUser]:
-        """获取当前登录用户"""
+        """获取���前登录用户"""
         try:
             # 从cookie中获取session
             session_data = request.headers.get('Cookie')
