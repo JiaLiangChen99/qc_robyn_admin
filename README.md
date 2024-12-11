@@ -28,10 +28,9 @@ read more info in [en_doc](https://qc-robyn-admin.readthedocs.io/en/latest/en/)
 - [x] add admin interface for Robyn framework
 - [x] register Tortoise ORM to Admin Modal 
 - [x] add filter component in admin
-- [x] add language support
-- [ ] optimize UI
-- [ ] support edit of image upload
 - [x] add support for related tables
+- [ ] add language support
+- [ ] support edit of image upload
 
 ## Installation
 
@@ -39,8 +38,8 @@ You can install robyn-admin via pip:
 
 ```
 bash
-pip install qc_robyn-admin
+pip install qc_robyn_admin
 
-pip install git+https://github.com/0x7eQiChen/qc_robyn-admin.git
+pip install git+https://github.com/0x7eQiChen/qc_robyn_admin.git
 ```
 
