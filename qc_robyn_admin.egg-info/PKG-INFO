@@ -1,19 +1,16 @@
 Metadata-Version: 2.1
 Name: qc-robyn-admin
-Version: 0.1.1
-Summary: A backend framework based on Robyn and Tortoise-ORM, providing modules for model filtering, query joining, authentication, and more
+Version: 0.1.3
+Summary: A backend framework based on Robyn and Tortoise-ORM
 Home-page: https://github.com/0x7eQiChen/robyn-admin
 Author: 0x7eQiChen
-Author-email: 1356617750@qq.com
+Author-email: 0x7eQiChen <1356617750@qq.com>
 Classifier: Programming Language :: Python :: 3
 Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
 License-File: LICENSE
-Requires-Dist: robyn
-Requires-Dist: tortoise-orm
-Requires-Dist: jinja2
 
 # Robyn Admin
 
