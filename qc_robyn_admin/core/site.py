@@ -6,9 +6,12 @@ from robyn.templating import JinjaTemplate
 from pathlib import Path
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import traceback
 from urllib.parse import parse_qs, unquote
+import secrets
+import hashlib
+import base64
 
 from ..auth_admin import AdminUserAdmin, RoleAdmin, UserRoleAdmin
 from ..auth_models import AdminUser, Role, UserRole
@@ -16,20 +19,21 @@ from .admin import ModelAdmin
 from .menu import MenuManager, MenuItem
 from ..models import AdminUser
 from ..i18n.translations import get_text
-
+from typing import Callable
 
 class AdminSite:
     """Admin站点主类"""
     def __init__(
         self, 
         app: Robyn,
-        title: str = 'Robyn Admin',  # 后台名称
+        title: str = 'QC Robyn Admin',  # 后台名称
         prefix: str = 'admin',       # 路由前缀
-        copyright: str = "qicheng robyn admin",       # 版权信息，如果为None则不显示
+        copyright: str = "QC Robyn Admin",       # 版权信息，如果为None则不显示
         db_url: Optional[str] = None,
         modules: Optional[Dict[str, List[Union[str, ModuleType]]]] = None,
         generate_schemas: bool = True,
-        default_language: str = 'en_US'
+        default_language: str = 'en_US',
+        startup_function: Optional[Callable] = None
     ):
         """
         初始化Admin站点
@@ -50,7 +54,7 @@ class AdminSite:
         self.default_language = default_language
         self.menu_manager = MenuManager()
         self.copyright = copyright   # 添加版权属性
-        
+        self.startup_function = startup_function
         # 设置模板
         self._setup_templates()
         
@@ -63,6 +67,14 @@ class AdminSite:
         # 设置路由
         self._setup_routes()
 
+        self.session_secret = secrets.token_hex(32)  # 生成随机密钥
+        self.session_expire = 24 * 60 * 60  # 会话过期时间（秒）
+
+    def get_text(self, key: str, lang: str = None) -> str:
+        """使用站点默认语言的文本获取函数"""
+        from ..i18n.translations import get_text, TRANSLATIONS
+        current_lang = lang or self.default_language
+        return TRANSLATIONS.get(current_lang, TRANSLATIONS[self.default_language]).get(key, key)
 
     def init_register_auth_models(self):
         # 注册系统管理模型
@@ -71,14 +83,14 @@ class AdminSite:
         self.register_model(UserRole, UserRoleAdmin)
 
     def _setup_templates(self):
-        """设置板目录"""
+        """设置模板目录"""
         current_dir = Path(__file__).parent.parent
         template_dir = os.path.join(current_dir, 'templates')
         self.template_dir = template_dir
         # 创建 Jinja2 环境并添加全局函数
         self.jinja_template = JinjaTemplate(template_dir)
         self.jinja_template.env.globals.update({
-            'get_text': get_text
+            'get_text': self.get_text
         })
 
 
@@ -104,21 +116,20 @@ class AdminSite:
             # 确保admin模型和用户模都加载
             if "models" in self.modules:
                 if isinstance(self.modules["models"], list):
-                    if "robyn_admin.models" not in self.modules["models"]:
-                        self.modules["models"].append("robyn_admin.models")
-                    elif "robyn_admin.auth_models" not in self.modules["models"]:
-                        self.modules["models"].append("robyn_admin.auth_models")
+                    if "qc_robyn_admin.models" not in self.modules["models"]:
+                        self.modules["models"].append("qc_robyn_admin.models")
+                    elif "qc_robyn_admin.auth_models" not in self.modules["models"]:
+                        self.modules["models"].append("qc_robyn_admin.auth_models")
                 else:
-                    self.modules["models"] = ["robyn_admin.models","robyn_admin.auth_models", self.modules["models"]]
+                    self.modules["models"] = ["qc_robyn_admin.models","qc_robyn_admin.auth_models", self.modules["models"]]
             else:
-                self.modules["models"] = ["robyn_admin.models","robyn_admin.auth_models"]
+                self.modules["models"] = ["qc_robyn_admin.models","qc_robyn_admin.auth_models"]
             # 初始化数据库连接
             if not Tortoise._inited:
                 await Tortoise.init(
-                    db_url=self.db_url,
-                    modules=self.modules
-                )
-            
+                        db_url=self.db_url,
+                        modules=self.modules
+                    )
             self.init_register_auth_models()
 
             if self.generate_schemas:
@@ -135,7 +146,9 @@ class AdminSite:
                         is_superuser=True
                     )
             except Exception as e:
-                print(f"创建管理账号败: {str(e)}")
+                print(f"创建管理账号失败: {str(e)}")
+            if self.startup_function:
+                await self.startup_function()
 
     def _setup_routes(self):
         """设置路由"""
@@ -143,7 +156,7 @@ class AdminSite:
         async def admin_index(request: Request):
             user = await self._get_current_user(request)
             if not user:
-                return Response(status_code=307, headers={"Location": f"/{self.prefix}/login"})
+                return Response(status_code=307, description="Location login page" ,headers={"Location": f"/{self.prefix}/login"})
             
             language = await self._get_language(request)
             
@@ -167,7 +180,7 @@ class AdminSite:
         async def admin_login(request: Request):
             user = await self._get_current_user(request)
             if user:
-                return Response(status_code=307, headers={"Location": f"/{self.prefix}"})
+                return Response(status_code=307, description="Location to admin page", headers={"Location": f"/{self.prefix}"})
             
             language = await self._get_language(request)  # 获取语言设置
             context = {
@@ -180,53 +193,63 @@ class AdminSite:
             
         @self.app.post(f"/{self.prefix}/login")
         async def admin_login_post(request: Request):
-            data = request.body
-            params = parse_qs(data)
-            params_dict = {key: value[0] for key, value in params.items()}
-            username = params_dict.get("username")
-            password = params_dict.get("password")
-            user = await AdminUser.authenticate(username, password)
-            if user:
-                session = {"user_id": user.id}
+            try:
+                data = request.body
+                params = parse_qs(data)
+                params_dict = {key: value[0] for key, value in params.items()}
+                username = params_dict.get("username")
+                password = params_dict.get("password")
                 
-                # 建安全的 cookie 字符串
-                cookie_value = json.dumps(session)
-                cookie_attrs = [
-                    f"session={cookie_value}",
-                    "HttpOnly",          # 防止JavaScript访问
-                    "SameSite=Lax",     # 防止CSRF
-                    # "Secure"          # 仅在生产环境启用HTTPS消注释
-                    "Path=/",           # cookie的作用路
-                ]
-                
-                response = Response(
-                    status_code=303, 
-                    description="", 
-                    headers={
-                        "Location": f"/{self.prefix}",
-                        "Set-Cookie": "; ".join(cookie_attrs)
+                user = await AdminUser.authenticate(username, password)
+                if user:
+                    # 生成安全的会话令牌
+                    token = self._generate_session_token(user.id)
+                    
+                    # 设置安全的cookie
+                    cookie_attrs = [
+                        f"session_token={token}",
+                        "HttpOnly",          # 防止JavaScript访问
+                        "SameSite=Lax",     # 防止CSRF
+                        "Secure",           # 启用HTTPS
+                        "Path=/",           # cookie的作用路径
+                        f"Max-Age={self.session_expire}"  # 设置过期时间
+                    ]
+                    
+                    response = Response(
+                        status_code=303, 
+                        description="", 
+                        headers={
+                            "Location": f"/{self.prefix}",
+                            "Set-Cookie": "; ".join(cookie_attrs)
+                        }
+                    )
+                    
+                    user.last_login = datetime.now()
+                    await user.save()
+                    return response
+                else:
+                    print("登录失败")
+                    context = {
+                        "error": "用户名或密码错误",
+                        "user": None
                     }
-                )
-                user.last_login = datetime.now()
-                await user.save()
-                return response
-            else:
-                print("登录失败")
-                context = {
-                    "error": "用户或密码错误",
-                    "user": None
-                }
-                return self.jinja_template.render_template("admin/login.html", **context)
-
+                    return self.jinja_template.render_template("admin/login.html", **context)
                 
+            except Exception as e:
+                print(f"Login error: {str(e)}")
+                return Response(
+                    status_code=500,
+                    description="登录失败"
+                )
+
         @self.app.get(f"/{self.prefix}/logout")
         async def admin_logout(request: Request):
-            # 清除cookie时也需同的属性
+            # 清除cookie
             cookie_attrs = [
-                "session=",  # 空值
+                "session_token=",
                 "HttpOnly",
                 "SameSite=Lax",
-                # "Secure"
+                "Secure",
                 "Path=/",
                 "Max-Age=0"  # 立即过期
             ]
@@ -266,7 +289,6 @@ class AdminSite:
                 for field in model_admin.search_fields
                 if request.query_params.get(f"search_{field.name}")
             }
-            print("搜索参数", search_values)
             # 执行搜索查询
             queryset = await model_admin.get_queryset(request, search_values)
             objects = await queryset.limit(model_admin.per_page)
@@ -281,7 +303,6 @@ class AdminSite:
                     for obj in objects
                 ]
             }
-            print("查询功能结果", result)
             return jsonify(result)
 
 
@@ -297,7 +318,8 @@ class AdminSite:
                         description="Not logged in"
                     )
                 
-                # 检查权限时使用route_id
+                language = await self._get_language(request)
+
                 if not await self.check_permission(request, route_id, 'view'):
                     return Response(
                         status_code=403, 
@@ -305,54 +327,26 @@ class AdminSite:
                         description="没有权限访问此页面"
                     )
                 
-                # 获取模型管理器实例
-                print("获取类", self.models)
-                print("获取映射模型类", self.model_registry)
                 model_admin = self.get_model_admin(route_id)
                 if not model_admin:
-                    print(f"Model admin not found for route_id: {route_id}")
-                    print(f"Available route_ids: {list(self.models.keys())}")
                     return Response(
                         status_code=404, 
                         headers={"Content-Type": "text/html"},
                         description="model not found"
                     )
                 
-                # 获取前端配置
                 frontend_config = await model_admin.get_frontend_config()
-                print("Model list frontend config:", frontend_config)
                 
-                language = await self._get_language(request)
+                # 确保语言设置正确传递
                 frontend_config["language"] = language
-                
-                # 添加翻译文本
-                translations = {
-                    "add": get_text("add", language),
-                    "batch_delete": get_text("batch_delete", language),
-                    "confirm_batch_delete": get_text("confirm_batch_delete", language),
-                    "deleting": get_text("deleting", language),
-                    "delete_success": get_text("delete_success", language),
-                    "delete_failed": get_text("delete_failed", language),
-                    "selected_items": get_text("selected_items", language),
-                    "clear_selection": get_text("clear_selection", language),
-                    "please_select_items": get_text("please_select_items", language),
-                    "export": get_text("export", language),
-                    "export_selected": get_text("export_selected", language),
-                    "export_current": get_text("export_current", language),
-                    "load_failed": get_text("load_failed", language),
-                    # 添加过滤器相关的翻译
-                    "search": get_text("search", language),
-                    "reset": get_text("reset", language),
-                    "filter": get_text("filter", language),
-                    "all": get_text("all", language),  # 添加"全部"选项的翻译
-                }
+                frontend_config["default_language"] = self.default_language
                 
                 # 过滤用户有权限访问的模型
                 filtered_models = {}
                 for rid, madmin in self.models.items():
                     if await self.check_permission(request, rid, 'view'):
                         filtered_models[rid] = madmin
-
+                
                 context = {
                     "site_title": self.title,
                     "models": filtered_models,
@@ -362,10 +356,8 @@ class AdminSite:
                     "current_model": route_id,
                     "verbose_name": model_admin.verbose_name,
                     "frontend_config": frontend_config,
-                    "translations": translations,
                     "copyright": self.copyright
-                }
-                print("成功返回页面")
+                }  
                 return self.jinja_template.render_template("admin/model_list.html", **context)
                 
             except Exception as e:
@@ -394,18 +386,15 @@ class AdminSite:
                 # 检查权限
                 if not await self.check_permission(request, route_id, 'add'):
                     return Response(status_code=403, description="没有添加权限", headers={"Content-Type": "text/html"})
-                form_fields = await model_admin.get_add_form_fields()
                 # 解析表单数据
                 data = request.body
                 params = parse_qs(data)
                 form_data = {}
-                
                 for key, value in params.items():
                     try:
                         form_data[key] = json.loads(value[0])
-                    except:
+                    except Exception as e:
                         form_data[key] = value[0]
-                # 调用模型管理类的处理方法
                 success, message = await model_admin.handle_add(request, form_data)
                 
                 if success:
@@ -423,6 +412,7 @@ class AdminSite:
                     
             except Exception as e:
                 print(f"Add error: {str(e)}")
+                traceback.print_exc()
                 return Response(
                     status_code=500,
                     description=f"添加失败: {str(e)}",
@@ -647,10 +637,10 @@ class AdminSite:
                 uploaded_files = []
                 for file_name, file_bytes in files.items():
                     # 证文件类型
-                    if not file_name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                    if not file_name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.sql', '.xlsx', '.csv', '.xls')):
                         return jsonify({
                             "code": 400,
-                            "message": "不支持文件类型，支持jpgjpeg、png、gif格式",
+                            "message": "不支持文件类型",
                             "success": False
                         })
 
@@ -679,7 +669,7 @@ class AdminSite:
                     "code": 200,
                     "message": "上传成功",
                     "success": True,
-                    "data": uploaded_files[0] if uploaded_files else None  # 返回一个文件的信息
+                    "data": uploaded_files[0] if uploaded_files else None  # 返回一个文件的息
                 })
                 
             except Exception as e:
@@ -737,7 +727,6 @@ class AdminSite:
                 route_id = request.path_params['route_id']
                 model_admin = self.get_model_admin(route_id)
                 if not model_admin:
-                    print(f"Model admin not found for: {route_id}")
                     return jsonify({"error": "Model not found"}, status_code=404)
                 
                 params: dict = request.query_params.to_dict()
@@ -747,11 +736,8 @@ class AdminSite:
                 # 获取排序参数
                 sort_field = params.get('sort', [''])[0]
                 sort_order = params.get('order', ['asc'])[0]
-                
-                print(f"Getting inline data for {route_id}, parent_id: {parent_id}, inline_model: {inline_model}")
-                
+                                
                 if not parent_id or not inline_model:
-                    print("Missing required parameters")
                     return jsonify({"error": "Missing parameters"})
                 
                 # 找到对应的内联实例
@@ -801,7 +787,6 @@ class AdminSite:
                     }
                     for field in inline.table_fields
                 ]
-                print("Fields config:", fields_config)  # 添加调试输出
                 return Response(
                     status_code=200,
                     headers={"Content-Type": "application/json; charset=utf-8"},
@@ -820,6 +805,82 @@ class AdminSite:
                     {"error": str(e)}, 
                     # headers={"Content-Type": "application/json; charset=utf-8"}
                 )
+        
+        @self.app.post(f"/{self.prefix}/:route_id/import")
+        async def handle_import(request: Request):
+            """处理数据导入"""
+            try:
+                route_id = request.path_params.get("route_id")
+                model_admin = self.get_model_admin(route_id)
+                
+                if not model_admin or not model_admin.allow_import:
+                    return jsonify({
+                        "success": False,
+                        "message": "不支持导入功能"
+                    })
+                
+                # 获取上传的文件
+                files = request.files
+                filename = list(files.keys())[0]
+                if not files:
+                    return jsonify({
+                        "success": False,
+                        "message": "未上传文件"
+                    })
+                    
+                file_data = next(iter(files.values()))
+                
+                # 检查文件类型
+                if not any(filename.endswith(ext) for ext in ['.xlsx', '.xls', '.csv']):
+                    return jsonify({
+                        "success": False,
+                        "message": "仅支持 Excel 或 CSV 文件"
+                    })
+                    
+                # 处理文件数据
+                import pandas as pd
+                import io
+                
+                df = None
+                if filename.endswith('.csv'):
+                    df = pd.read_csv(io.BytesIO(file_data))
+                else:
+                    df = pd.read_excel(io.BytesIO(file_data))
+                    
+                # 验证字段
+                missing_fields = [f for f in model_admin.import_fields if f not in df.columns]
+                if missing_fields:
+                    return jsonify({
+                        "success": False,
+                        "message": f"缺少必需字段: {', '.join(missing_fields)}"
+                    })
+                    
+                # 导入数据
+                success_count = 0
+                error_count = 0
+                errors = []
+                
+                for _, row in df.iterrows():
+                    try:
+                        data = {field: row[field] for field in model_admin.import_fields}
+                        await model_admin.model.create(**data)
+                        success_count += 1
+                    except Exception as e:
+                        error_count += 1
+                        errors.append(str(e))
+                        
+                return jsonify({
+                    "success": True,
+                    "message": f"导入完成: 成功 {success_count} 条, 失败 {error_count} 条",
+                    "errors": errors if errors else None
+                })
+                
+            except Exception as e:
+                print(f"Import error: {str(e)}")
+                return jsonify({
+                    "success": False,
+                    "message": f"导入失败: {str(e)}"
+                })
         
     def register_model(self, model: Type[Model], admin_class: Optional[Type[ModelAdmin]] = None):
         """注册模型admin站点"""
@@ -856,8 +917,51 @@ class AdminSite:
             self.model_registry[model.__name__] = []
         self.model_registry[model.__name__].append(instance)
 
+    def _generate_session_token(self, user_id: int) -> str:
+        """生成安全的会话令牌"""
+        timestamp = int(datetime.now().timestamp())
+        # 组合用户ID、时间戳和随机值
+        raw_token = f"{user_id}:{timestamp}:{secrets.token_hex(16)}"
+        # 使用密钥进行签名
+        signature = hashlib.sha256(
+            f"{raw_token}:{self.session_secret}".encode()
+        ).hexdigest()
+        # 组合并编码
+        token = base64.urlsafe_b64encode(
+            f"{raw_token}:{signature}".encode()
+        ).decode()
+        return token
+
+    def _verify_session_token(self, token: str) -> tuple[bool, Optional[int]]:
+        """验证会话令牌"""
+        try:
+            # 解码令牌
+            decoded = base64.urlsafe_b64decode(token.encode()).decode()
+            raw_token, signature = decoded.rsplit(":", 1)
+            
+            # 验证签名
+            expected_signature = hashlib.sha256(
+                f"{raw_token}:{self.session_secret}".encode()
+            ).hexdigest()
+            
+            if not secrets.compare_digest(signature, expected_signature):
+                return False, None
+            
+            # 解析令牌内容
+            user_id, timestamp, _ = raw_token.split(":", 2)
+            timestamp = int(timestamp)
+            
+            # 检查是否过期
+            if datetime.now().timestamp() - timestamp > self.session_expire:
+                return False, None
+            
+            return True, int(user_id)
+        except Exception as e:
+            print(f"Session verification error: {str(e)}")
+            return False, None
+
     async def _get_current_user(self, request: Request) -> Optional[AdminUser]:
-        """获取���前登录用户"""
+        """获取当前登录用户"""
         try:
             # 从cookie中获取session
             session_data = request.headers.get('Cookie')
@@ -866,20 +970,24 @@ class AdminSite:
             
             session_dict = {}
             for item in session_data.split(";"):
-                key, value = item.split("=")
-                session_dict[key.strip()] = value.strip()
+                if "=" in item:
+                    key, value = item.split("=", 1)
+                    session_dict[key.strip()] = value.strip()
             
-            session = session_dict.get("session")
-            user_id = json.loads(session).get("user_id")
-            if not user_id:
+            token = session_dict.get("session_token")
+            if not token:
                 return None
             
+            # 验证会话令牌
+            valid, user_id = self._verify_session_token(token)
+            if not valid:
+                return None
+
             try:
-                # 先获取用户
                 user = await AdminUser.get(id=user_id)
                 if not user:
                     return None
-                    
+                
                 # 手动获取用户的角色
                 user_roles = await UserRole.filter(user_id=user.id).prefetch_related('role')
                 roles = [ur.role for ur in user_roles]
@@ -919,13 +1027,11 @@ class AdminSite:
                 return user
                 
             except Exception as e:
-                print(f"Error loading user roles: {str(e)}")
-                traceback.print_exc()
+                print(f"Error loading user: {str(e)}")
                 return None
             
         except Exception as e:
             print(f"Error getting current user: {str(e)}")
-            traceback.print_exc()
             return None
         
     async def _get_language(self, request: Request) -> str:

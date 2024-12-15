@@ -15,7 +15,7 @@ TRANSLATIONS = {
         'edit': '编辑',
         'delete': '删除',
         'batch_delete': '批量删除',
-        'export': '导出数据',
+        'export': '导出',
         'yes': '是',
         'no': '否',
         'normal': '正常',
@@ -39,7 +39,7 @@ TRANSLATIONS = {
         # 提示信息
         'confirm_delete': '确定要删除吗？',
         'operation_success': '操作成功',
-        'operation_failed': '操作失���',
+        'operation_failed': '操作失败',
         'please_select': '请选择',
         'loading': '加载中...',
         'no_data': '暂无数据',
@@ -51,8 +51,8 @@ TRANSLATIONS = {
         'please_select_items': '请选择要删除的记录',
         'confirm_batch_delete': '确定要删除选中的 {count} 条记录吗？',
         'deleting': '删除中...',
-        'export_selected': '已导出 {count} 条选中数据',
-        'export_current': '已导出当前页所有数据',
+        'export_selected': '导出选中',
+        'export_current': '导出当前页',
         'switch_language_failed': '切换语言失败',
         'load_failed': '加载数据失败，请刷新页面重试',
         'delete_failed': '删除失败，请重试',
@@ -66,6 +66,7 @@ TRANSLATIONS = {
         'pagination_info': '显示第 {from} 到 {to} 条记录，共 {total} 条',
         'edit': '编辑',
         'row_delete': '删除',
+        'import': '导入',
         # 过滤器相关
         'start_date': '开始日期',
         'end_date': '结束日期',
@@ -82,6 +83,18 @@ TRANSLATIONS = {
         'user_management': '用户管理',
         'role_management': '角色管理',
         'user_role_management': '用户角色管理',
+
+        # 导入相关
+        'import_data': '导入数据',
+        'select_file': '选择文件',
+        'supported_formats': '支持的格式: Excel (.xlsx, .xls), CSV (.csv)',
+        'required_fields': '必需字段',
+        'import_button': '导入',
+
+        # 文件上传相关
+        'choose_file': '选择文件',
+        'no_file_chosen': '未选择文件',
+        'please_select_file': '请选择文件',
     },
     'en_US': {
         # Common
@@ -150,6 +163,7 @@ TRANSLATIONS = {
         'pagination_info': 'Showing {from} to {to} of {total} entries',
         'edit': 'edit',
         'row_delete': 'delete',
+        'import': 'Import',
         # Filter related
         'start_date': 'Start Date',
         'end_date': 'End Date',
@@ -166,9 +180,24 @@ TRANSLATIONS = {
         'user_management': 'User Management',
         'role_management': 'Role Management',
         'user_role_management': 'User Role Management',
+
+        # 导入相关
+        'import_data': 'Import Data',
+        'select_file': 'Select File',
+        'supported_formats': 'Supported formats: Excel (.xlsx, .xls), CSV (.csv)',
+        'required_fields': 'Required fields',
+        'import_button': 'Import',
+
+        # 文件上传相关
+        'choose_file': 'Choose File',
+        'no_file_chosen': 'No file chosen',
+        'please_select_file': 'Please select a file',
     }
 }
 
-def get_text(key: str, lang: str = 'en_US') -> str:
+def get_text(key: str, lang: str = None) -> str:
     """获取指定语言的文本"""
-    return TRANSLATIONS.get(lang, TRANSLATIONS['en_US']).get(key, key) 
+    # 如果没有指定语言，使用英文作为默认值
+    default_lang = 'en_US'
+    current_lang = lang or default_lang
+    return TRANSLATIONS.get(current_lang, TRANSLATIONS[default_lang]).get(key, key) 

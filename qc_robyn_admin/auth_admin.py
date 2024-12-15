@@ -89,7 +89,6 @@ class UserRoleAdmin(ModelAdmin):
         
         user_choices = {str(user.id): user.username for user in users}
         role_choices = {str(role.id): role.name for role in roles}
-        print(user_choices, role_choices)
         return [
             FormField(
                 "user_id",

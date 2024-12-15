@@ -42,9 +42,7 @@ class MenuItem:
 
 def trace_method(func):
     def wrapper(*args, **kwargs):
-        print(f"\n>>> Calling {func.__name__} <<<")
         result = func(*args, **kwargs)
-        print(f">>> Finished {func.__name__} <<<\n")
         return result
     return wrapper
 
@@ -78,6 +76,8 @@ class ModelAdmin:
         self.default_ordering = getattr(self, 'default_ordering', [])
         self.add_form_title = getattr(self, 'add_form_title', f"添加{self.verbose_name}")
         self.edit_form_title = getattr(self, 'edit_form_title', f"编辑{self.verbose_name}")
+        self.allow_import = getattr(self, 'allow_import', False)  # 是否允许导入
+        self.import_fields = getattr(self, 'import_fields', [])   # 允许导入的字段
         # 初始化其他配置
         if not hasattr(self, 'table_fields'):
             self.table_fields = []
@@ -185,7 +185,6 @@ class ModelAdmin:
     async def get_queryset(self, request: Request, params: dict) -> QuerySet:
         """geting tortoise queryset"""
         queryset = self.model.all()
-        print("queryset init is", queryset)
         # 这里需要对params里面的数据进行url解码, params是dict类型
         for key, value in params.items():
             if isinstance(value, str):
@@ -196,7 +195,6 @@ class ModelAdmin:
                 parent_id = params.get(inline.fk_field)  # 使用配置的外键字段名
                 if parent_id:
                     queryset = queryset.filter(**{f"{inline.fk_field}_id": parent_id})
-                    print(f"Filtered by {inline.fk_field}_id =", parent_id)
                     break
         # 处理搜索
         search = params.get('search', '')
@@ -206,7 +204,6 @@ class ModelAdmin:
                 try:
                     # 使用 SearchField 的 build_search_query 方法构建查询
                     query_dict = await field.build_search_query(search)
-                    print(f"Search field {field.name} query:", query_dict)
                     if query_dict:
                         if len(query_dict) == 1 and "id" in query_dict and query_dict["id"] is None:
                             continue  # 跳过没有匹配结果的关联搜索
@@ -221,7 +218,6 @@ class ModelAdmin:
             if search_conditions:
                 combined_q = reduce(operator.or_, search_conditions)
                 queryset = queryset.filter(combined_q)
-                print("After search queryset:", queryset)
         
         # 处理过滤器
         filter_fields = await self.get_filter_fields()
@@ -230,7 +226,6 @@ class ModelAdmin:
             if filter_value:
                 try:
                     query_dict = await filter_field.build_filter_query(filter_value)
-                    print(f"Filter field {filter_field.name} query:", query_dict)
                     if query_dict:
                         if len(query_dict) == 1 and "id" in query_dict and query_dict["id"] is None:
                             continue
@@ -240,7 +235,6 @@ class ModelAdmin:
                         else:
                             # 否则使用关键字参数
                             queryset = queryset.filter(**query_dict)
-                        print("Updated queryset:", queryset)
                 except Exception as e:
                     print(f"Error building filter query for {filter_field.name}: {str(e)}")
                     continue
@@ -313,7 +307,6 @@ class ModelAdmin:
                 
                 # 处理 switch 类型字段
                 if field.display_type == DisplayType.SWITCH:
-                    print(f"Serializing switch field {field.name}: {value}, type: {type(value)}")
                     result[field.name] = value
                     continue
                 
@@ -334,14 +327,11 @@ class ModelAdmin:
                                 else:
                                     # 如果字段名不符合预期格式，使用默认字段
                                     related_field = 'id'
-                                print(f"Getting related field: {related_field} from {model_name}")
                                 # 获取关联字段的值
                                 related_value = getattr(related_obj, related_field)
                                 result[field.name] = str(related_value) if related_value is not None else ''
                                 continue
                     except Exception as e:
-                        print(f"Error getting related object: {str(e)}")
-                        print(f"Field name: {field.name}, Related model: {field.related_model.__name__}, Related key: {field.related_key}")
                         result[field.name] = ''
                         continue
                 
@@ -389,12 +379,6 @@ class ModelAdmin:
             'formatter': True if field.formatter else False
         }
 
-    def get_search_fields(self) -> List[str]:
-        return [field.name for field in self.search_fields]
-
-    def get_ordering_fields(self) -> List[str]:
-        return [field.name for field in self.table_fields if field.sortable]
-
     async def get_filter_fields(self) -> List[FilterField]:
         return self.filter_fields
 
@@ -406,7 +390,6 @@ class ModelAdmin:
         """获取前端配置"""
         form_fields = await self.get_form_fields()
         add_form_fields = await self.get_add_form_fields()
-        # 异步获取过滤段
         filter_fields = await self.get_filter_fields()
         search_fields = await self.get_search_fields()
         config = {
@@ -419,11 +402,13 @@ class ModelAdmin:
             "addFormTitle": self.add_form_title or f"添加{self.verbose_name}",
             "editFormTitle": self.edit_form_title or f"编辑{self.verbose_name}",
             "searchFields": [field.to_dict() for field in search_fields],
-            "filterFields": [field.to_dict() for field in filter_fields],  # 使用异步获取的filter_fields
+            "filterFields": [field.to_dict() for field in filter_fields],
             "enableEdit": self.enable_edit,
             "allowAdd": self.allow_add,
             "allowDelete": self.allow_delete,
             "allowExport": self.allow_export,
+            "allowImport": self.allow_import,
+            "import_fields": self.import_fields,
             "verbose_name": self.verbose_name,
             "is_inline": self.is_inline,
             "inlines": [
@@ -436,8 +421,6 @@ class ModelAdmin:
             ]
         }
         
-        print("Frontend config:", config)  # 添加调试信息
-        print("Filter fields:", config["filterFields"])  # 添加过滤字段调试信息
         return config
 
     async def get_inline_formsets(self, instance=None):
@@ -461,12 +444,10 @@ class ModelAdmin:
             # 找到对应的内联实例
             inline = next((i for i in self._inline_instances if i.model.__name__ == inline_model), None)
             if not inline:
-                print(f"No inline instance found for model: {inline_model}")
                 return []
             # 获取父实例
             parent_instance = await self.model.get(id=parent_id)
             if not parent_instance:
-                print(f"No parent instance found with id: {parent_id}")
                 return []
             # 获取关联单记录
             queryset = await inline.get_queryset(parent_instance)
@@ -560,12 +541,8 @@ class ModelAdmin:
             tuple[bool, str]: (是否成功, 消息)
         """
         try:
-            # 处理表单数据
             processed_data = await self.process_form_data(data)
-            
-            # 创建对象
             obj = await self.model.create(**processed_data)
-            
             return True, "创建成功"
             
         except Exception as e:
@@ -574,8 +551,8 @@ class ModelAdmin:
 
     async def handle_delete(self, request: Request, object_id: str) -> tuple[bool, str]:
         """
-        处理删除操作的钩子方法
-        
+        处理删除操作的钩子方法 
+
         Args:
             request: Request对象
             object_id: 记录ID
@@ -587,11 +564,8 @@ class ModelAdmin:
             obj = await self.get_object(object_id)
             if not obj:
                 return False, "记录不存在"
-            
-            # 执行删除
             await obj.delete()
             return True, "删除成功"
-            
         except Exception as e:
             print(f"Delete error: {str(e)}")
             return False, f"删除失败: {str(e)}"
@@ -605,7 +579,7 @@ class ModelAdmin:
             ids: 要删除的记录ID列表
             
         Returns:
-            tuple[bool, str, int]: (是否成功, 消息, 删除成功数量)
+            tuple[bool, str, int]: (是否成功, ��息, 删除成功数量)
         """
         try:
             deleted_count = 0

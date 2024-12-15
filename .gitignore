@@ -6,8 +6,8 @@ __pycache__/
 venv/
 .idea/
 .vscode/
+.testdemo/
 *.log
-templates/
 example/
 static/
 Requirement.md
@@ -16,7 +16,6 @@ app.db-wal
 doc_requirement.md
 example.py
 main.py
-main2.py
 models.py
 project.md
 

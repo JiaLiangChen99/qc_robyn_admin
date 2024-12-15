@@ -41,12 +41,10 @@ class InlineModelAdmin:
     async def get_queryset(self, parent_instance):
         """获取关联的查询集"""
         if not parent_instance:
-            print("No parent instance provided")
             return self.model.none()
         
         # 构建查询条件
         filter_kwargs = {self.fk_field: parent_instance.id}
-        print(f"Querying {self.model.__name__} with filter: {filter_kwargs}")
         
         # 获取基础查询集
         queryset = self.model.filter(**filter_kwargs)
@@ -81,7 +79,6 @@ class InlineModelAdmin:
         
     async def serialize_object(self, obj: Model, for_display: bool = True) -> dict:
         """序列化对象"""
-        print(f"Serializing inline object: {obj}")
         result = {'id': str(getattr(obj, 'id', ''))}
         
         for field in self.table_fields:
@@ -119,5 +116,4 @@ class InlineModelAdmin:
                 print(f"Error processing field {field.name}: {str(e)}")
                 result[field.name] = ''
         
-        print(f"Serialized inline result: {result}")
         return result
