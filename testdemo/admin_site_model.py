@@ -1,4 +1,4 @@
-from qc_robyn_admin1.core import (ModelAdmin,  TableField, DisplayType, FormField,
+from qc_robyn_admin.core import (ModelAdmin,  TableField, DisplayType, FormField,
                                  SearchField, InputFilter, DateRangeFilter, SelectFilter
                                  )
 from .table import Author, Publisher, Category, Book, BookReview, BookInventory

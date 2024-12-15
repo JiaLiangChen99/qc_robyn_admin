@@ -12,6 +12,8 @@ from urllib.parse import parse_qs, unquote
 import secrets
 import hashlib
 import base64
+import importlib
+import atexit
 
 from ..auth_admin import AdminUserAdmin, RoleAdmin, UserRoleAdmin
 from ..auth_models import AdminUser, Role, UserRole
@@ -20,6 +22,8 @@ from .menu import MenuManager, MenuItem
 from ..models import AdminUser
 from ..i18n.translations import get_text
 from typing import Callable
+import qc_robyn_admin.models
+import qc_robyn_admin.auth_models
 
 class AdminSite:
     """Admin站点主类"""
@@ -62,6 +66,16 @@ class AdminSite:
         self.db_url = db_url
         self.modules = modules
         self.generate_schemas = generate_schemas
+        # 确保数据库文件路径存在
+        if db_url and db_url.startswith('sqlite'):
+            db_path = db_url.replace('sqlite://', '')
+            if db_path != ':memory:':
+                os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+        
+        # 注册程序退出时的清理函数
+        atexit.register(self._cleanup_db)
+        
+        # 初始化数据库
         self._init_admin_db()
         
         # 设置路由
@@ -93,6 +107,17 @@ class AdminSite:
             'get_text': self.get_text
         })
 
+    def _cleanup_db(self):
+        """清理数据库连接"""
+        if Tortoise._inited:
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            loop.run_until_complete(Tortoise.close_connections())
 
     def _init_admin_db(self):
         """初始化admin数据"""
@@ -100,55 +125,120 @@ class AdminSite:
         
         @self.app.startup_handler
         async def init_admin():
-            # 如果没有提供配置,试获取已有配置
-            if not self.db_url:
-                if not Tortoise._inited:
-                    raise Exception("数据库未始化,配置数据库或提供db_url参数")
-                # 复用现有配置
-                current_config = Tortoise.get_connection("default").config
-                self.db_url = current_config.get("credentials", {}).get("dsn")
-            
-            if not self.modules:
-                if not Tortoise._inited:
-                    raise Exception("数据库未初始化,请先配置数据库或提供modules参数")
-                # 用现有modules配
-                self.modules = dict(Tortoise.apps)
-            # 确保admin模型和用户模都加载
-            if "models" in self.modules:
-                if isinstance(self.modules["models"], list):
-                    if "qc_robyn_admin.models" not in self.modules["models"]:
-                        self.modules["models"].append("qc_robyn_admin.models")
-                    elif "qc_robyn_admin.auth_models" not in self.modules["models"]:
-                        self.modules["models"].append("qc_robyn_admin.auth_models")
+            try:
+                # 如果没有提供配置,试获取已有配置
+                if not self.db_url:
+                    if not Tortoise._inited:
+                        raise Exception("数据库未初始化,配置数据库或提供db_url参数")
+                    # 复用现有配置
+                    current_config = Tortoise.get_connection("default").config
+                    self.db_url = current_config.get("credentials", {}).get("dsn")
+                
+                # 如果是相对路径的sqlite数据库，转换为绝对路径
+                if self.db_url and self.db_url.startswith('sqlite://') and not self.db_url.startswith('sqlite://:memory:'):
+                    db_path = self.db_url.replace('sqlite://', '')
+                    if not os.path.isabs(db_path):
+                        abs_path = os.path.abspath(db_path)
+                        self.db_url = f'sqlite://{abs_path}'
+                
+                # 处理模块配置
+                if self.modules is None:
+                    # 动态导入内部模型模块
+                    try:
+                        models_module = importlib.import_module("qc_robyn_admin.models")
+                        auth_models_module = importlib.import_module("qc_robyn_admin.auth_models")
+                        
+                        self.modules = {
+                            "models": [
+                                models_module,  # 直接使用模块对象而不是字符串
+                                auth_models_module
+                            ]
+                        }
+                    except ImportError as e:
+                        print(f"Error importing internal modules: {e}")
+                        raise
+                        
+                elif not self.modules:
+                    # 如果是字典，获取现有配置
+                    if not Tortoise._inited:
+                        raise Exception("数据库未初始化,请先配置数据库或提供modules参数")
+                    self.modules = dict(Tortoise.apps)
+                    # 确保内部模型被加载
+                    try:
+                        models_module = importlib.import_module("qc_robyn_admin.models")
+                        auth_models_module = importlib.import_module("qc_robyn_admin.auth_models")
+                        
+                        if "models" in self.modules and isinstance(self.modules["models"], list):
+                            self.modules["models"].extend([models_module, auth_models_module])
+                        else:
+                            self.modules["models"] = [models_module, auth_models_module]
+                    except ImportError as e:
+                        print(f"Error importing internal modules: {e}")
+                        raise
+                        
                 else:
-                    self.modules["models"] = ["qc_robyn_admin.models","qc_robyn_admin.auth_models", self.modules["models"]]
-            else:
-                self.modules["models"] = ["qc_robyn_admin.models","qc_robyn_admin.auth_models"]
-            # 初始化数据库连接
-            if not Tortoise._inited:
-                await Tortoise.init(
+                    # 如果提供了配置，确保内部模型被加载
+                    try:
+                        models_module = importlib.import_module("qc_robyn_admin.models")
+                        auth_models_module = importlib.import_module("qc_robyn_admin.auth_models")
+                        
+                        if "models" in self.modules:
+                            if isinstance(self.modules["models"], list):
+                                self.modules["models"].extend([models_module, auth_models_module])
+                            else:
+                                self.modules["models"] = [
+                                    models_module,
+                                    auth_models_module,
+                                    self.modules["models"]
+                                ]
+                        else:
+                            self.modules["models"] = [models_module, auth_models_module]
+                    except ImportError as e:
+                        print(f"Error importing internal modules: {e}")
+                        raise
+
+                # 初始化数据库连接
+                if not Tortoise._inited:
+                    print(f"Initializing database with URL: {self.db_url}")
+                    await Tortoise.init(
                         db_url=self.db_url,
                         modules=self.modules
                     )
-            self.init_register_auth_models()
+                    print("Database initialized successfully")
 
-            if self.generate_schemas:
-                await Tortoise.generate_schemas()
-                
-            # 创建默认超级用
-            try:
-                user_exists = await AdminUser.filter(username="admin").exists()
-                if not user_exists:
-                    await AdminUser.create(
-                        username="admin",
-                        password=AdminUser.hash_password("admin"),
-                        email="admin@example.com",
-                        is_superuser=True
-                    )
+                # 注册内部模型
+                self.init_register_auth_models()
+
+                # 生成表结构
+                if self.generate_schemas:
+                    print("Generating database schemas...")
+                    await Tortoise.generate_schemas()
+                    print("Database schemas generated successfully")
+
+                # 触发信号来创建管理员账号
+                try:
+                    # 检查是否已存在管理员账号
+                    existing_admin = await AdminUser.filter(username="admin").first()
+                    if not existing_admin:
+                        print("Creating default admin user...")
+                        await AdminUser.create(
+                            username="admin",
+                            password=AdminUser.hash_password("admin"),
+                            email="admin@example.com",
+                            is_superuser=True
+                        )
+                        print("Default admin user created successfully")
+                except Exception as e:
+                    print(f"Error creating admin user: {str(e)}")
+                    traceback.print_exc()
+
+                if self.startup_function:
+                    await self.startup_function()
+
             except Exception as e:
-                print(f"创建管理账号失败: {str(e)}")
-            if self.startup_function:
-                await self.startup_function()
+                print(f"Error in database initialization: {str(e)}")
+                traceback.print_exc()
+                raise
 
     def _setup_routes(self):
         """设置路由"""
@@ -160,7 +250,7 @@ class AdminSite:
             
             language = await self._get_language(request)
             
-            # 过滤用户有权限访问的模型
+            # 过滤用有权限访问的模型
             filtered_models = {}
             for route_id, model_admin in self.models.items():
                 if await self.check_permission(request, route_id, 'view'):
@@ -200,51 +290,64 @@ class AdminSite:
                 username = params_dict.get("username")
                 password = params_dict.get("password")
                 
+                print(f"Login attempt - username: {username}")  # 调试日志
+                
                 user = await AdminUser.authenticate(username, password)
                 if user:
                     # 生成安全的会话令牌
                     token = self._generate_session_token(user.id)
+                    print(f"Generated token for user {user.username}: {token}")  # 调试日志
                     
-                    # 设置安全的cookie
+                    # 修改 cookie 设置
                     cookie_attrs = [
                         f"session_token={token}",
-                        "HttpOnly",          # 防止JavaScript访问
-                        "SameSite=Lax",     # 防止CSRF
-                        "Secure",           # 启用HTTPS
-                        "Path=/",           # cookie的作用路径
-                        f"Max-Age={self.session_expire}"  # 设置过期时间
+                        "HttpOnly",
+                        "Path=/",
+                        f"Max-Age={self.session_expire}"
                     ]
                     
+                    # 在开发环境中暂时移除这些限制
+                    # "SameSite=Lax",
+                    # "Secure",
+                    
+                    # 更新用户最后登录时间
+                    user.last_login = datetime.now()
+                    await user.save()
+                    
+                    # 构造响应
                     response = Response(
-                        status_code=303, 
-                        description="", 
+                        status_code=303,
+                        description="Login successful",
                         headers={
                             "Location": f"/{self.prefix}",
-                            "Set-Cookie": "; ".join(cookie_attrs)
+                            "Set-Cookie": "; ".join(cookie_attrs),
+                            "Cache-Control": "no-cache, no-store, must-revalidate"
                         }
                     )
                     
-                    user.last_login = datetime.now()
-                    await user.save()
+                    print("Response headers:", response.headers)  # 调试日志
                     return response
                 else:
-                    print("登录失败")
+                    print(f"Authentication failed for username: {username}")  # 调试日志
                     context = {
                         "error": "用户名或密码错误",
-                        "user": None
+                        "user": None,
+                        "site_title": self.title,
+                        "copyright": self.copyright
                     }
                     return self.jinja_template.render_template("admin/login.html", **context)
                 
             except Exception as e:
                 print(f"Login error: {str(e)}")
+                traceback.print_exc()  # 打印完整的错误堆栈
                 return Response(
                     status_code=500,
-                    description="登录失败"
+                    description=f"登录失败: {str(e)}"
                 )
 
         @self.app.get(f"/{self.prefix}/logout")
         async def admin_logout(request: Request):
-            # 清除cookie
+            # 清cookie
             cookie_attrs = [
                 "session_token=",
                 "HttpOnly",
@@ -337,7 +440,7 @@ class AdminSite:
                 
                 frontend_config = await model_admin.get_frontend_config()
                 
-                # 确保语言设置正确传递
+                # 确保语言设置确传递
                 frontend_config["language"] = language
                 frontend_config["default_language"] = self.default_language
                 
@@ -656,7 +759,7 @@ class AdminSite:
                     with open(file_path, 'wb') as f:
                         f.write(file_bytes)
                     
-                    # 生成访问URL（使用相对路径）
+                    # 生成访问URL（使用绝对路径）
                     file_url = f"/{file_path.replace(os.sep, '/')}"
                     uploaded_files.append({
                         "original_name": file_name,
@@ -669,7 +772,7 @@ class AdminSite:
                     "code": 200,
                     "message": "上传成功",
                     "success": True,
-                    "data": uploaded_files[0] if uploaded_files else None  # 返回一个文件的息
+                    "data": uploaded_files[0] if uploaded_files else None  # 返回一个文件的信息
                 })
                 
             except Exception as e:
@@ -964,74 +1067,51 @@ class AdminSite:
         """获取当前登录用户"""
         try:
             # 从cookie中获取session
-            session_data = request.headers.get('Cookie')
-            if not session_data:
+            cookie_header = request.headers.get('Cookie')
+            print(f"Cookie header: {cookie_header}")  # 调试日志
+            
+            if not cookie_header:
+                print("No cookie header found")  # 调试日志
                 return None
             
-            session_dict = {}
-            for item in session_data.split(";"):
+            # 解析cookie
+            cookies = {}
+            for item in cookie_header.split(";"):
                 if "=" in item:
                     key, value = item.split("=", 1)
-                    session_dict[key.strip()] = value.strip()
+                    cookies[key.strip()] = value.strip()
             
-            token = session_dict.get("session_token")
+            token = cookies.get("session_token")
+            print(f"Found session token: {token}")  # 调试日志
+            
             if not token:
+                print("No session token in cookies")  # 调试日志
                 return None
             
             # 验证会话令牌
             valid, user_id = self._verify_session_token(token)
+            print(f"Token validation: valid={valid}, user_id={user_id}")  # 调试日志
+            
             if not valid:
+                print("Invalid session token")  # 调试日志
                 return None
 
             try:
                 user = await AdminUser.get(id=user_id)
-                if not user:
-                    return None
-                
-                # 手动获取用户的角色
-                user_roles = await UserRole.filter(user_id=user.id).prefetch_related('role')
-                roles = [ur.role for ur in user_roles]
-                
-                # 打印调试信息
-                print("\n=== User Info ===")
-                print(f"User ID: {user.id}")
-                print(f"Username: {user.username}")
-                print(f"User Roles: {[role.name for role in roles]}")
-                print(f"Role Models: {[role.accessible_models for role in roles]}")
-                print("================\n")
-                # 将角色列表存储为用户的属性
-                setattr(user, '_roles_cache', roles)
-                # 修改原有的roles.all方法
-                original_roles = user.roles
-                
-                class RolesWrapper:
-                    def __init__(self, roles_cache):
-                        self._roles_cache = roles_cache
-                        
-                    async def all(self):
-                        return self._roles_cache
-                        
-                    def __getattr__(self, name):
-                        return getattr(original_roles, name)
-                
-                # 使用描述器来包装roles属性
-                class RolesDescriptor:
-                    def __get__(self, obj, objtype=None):
-                        if not hasattr(obj, '_roles_wrapper'):
-                            obj._roles_wrapper = RolesWrapper(getattr(obj, '_roles_cache', []))
-                        return obj._roles_wrapper
-                
-                # 动态添加描述器
-                setattr(AdminUser, 'roles', RolesDescriptor())
-                
+                if user:
+                    print(f"Found user: {user.username}")  # 调试日志
+                else:
+                    print(f"No user found for id: {user_id}")  # 调试日志
                 return user
                 
             except Exception as e:
                 print(f"Error loading user: {str(e)}")
+                traceback.print_exc()
                 return None
-            
+                
         except Exception as e:
-            print(f"Error getting current user: {str(e)}")
+            print(f"Error in _get_current_user: {str(e)}")
+            traceback.print_exc()
             return None
         
     async def _get_language(self, request: Request) -> str:
