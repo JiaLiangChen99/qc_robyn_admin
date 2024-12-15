@@ -8,15 +8,13 @@ setup(
     description="A backend framework based on Robyn and Tortoise-ORM, providing modules for model filtering, query joining, authentication, and more",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/JiaLiangChen99/qc_robyn_admin.git",
+    url="https://github.com/0x7eQiChen/robyn-admin",
     packages=find_packages(),
     include_package_data=True,
     install_requires=[
         "robyn",
         "tortoise-orm",
-        "jinja2",
-        "openpyxl",
-        "pandas"
+        "jinja2"
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
