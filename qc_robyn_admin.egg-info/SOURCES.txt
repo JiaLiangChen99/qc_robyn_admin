@@ -2,6 +2,7 @@ LICENSE
 MANIFEST.in
 README.md
 pyproject.toml
+requirements.txt
 setup.py
 ./qc_robyn_admin/__init__.py
 ./qc_robyn_admin/auth_admin.py
@@ -44,6 +45,7 @@ qc_robyn_admin/models.py
 qc_robyn_admin.egg-info/PKG-INFO
 qc_robyn_admin.egg-info/SOURCES.txt
 qc_robyn_admin.egg-info/dependency_links.txt
+qc_robyn_admin.egg-info/requires.txt
 qc_robyn_admin.egg-info/top_level.txt
 qc_robyn_admin/core/__init__.py
 qc_robyn_admin/core/admin.py

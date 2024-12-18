@@ -1,8 +1,12 @@
 from setuptools import setup, find_packages
 
+# 读取依赖
+with open('requirements.txt') as f:
+    requirements = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+
 setup(
     name="qc-robyn-admin",
-    version="0.1.3",
+    version="0.1.5",
     author="0x7eQiChen",
     author_email="1356617750@qq.com",
     description="A backend framework based on Robyn and Tortoise-ORM",
@@ -24,14 +28,7 @@ setup(
             'models.py'
         ]
     },
-    install_requires=[
-        "robyn",
-        "tortoise-orm",
-        "jinja2",
-        "pandas",
-        "openpyxl",
-        "aiosqlite"
-    ],
+    install_requires=requirements,
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

@@ -1166,9 +1166,11 @@ class AdminSite:
             if user.is_superuser:
                 print("User is superuser, granting access")
                 return True
-            
+            user_roles = await UserRole.filter(user=user).prefetch_related('role')
+            roles = [ur.role for ur in user_roles]
             # 获取用户的所有角色
-            roles = await user.roles.all()
+            # roles = await user.roles.all()
+            print(roles)
             print(f"User roles: {[role.name for role in roles]}")
             
             # 检查每个角色的权限

@@ -43,11 +43,6 @@
             </div>
             {% endif %}
             
-            {# 添加过滤器面板 #}
-            {% if frontend_config.filterFields %}
-            {% include "admin/components/filter_panel.html" %}
-            {% endif %}
-            
             {# 添加表单模态框组件 #}
             {% include "admin/components/form_modal.html" %}
             
@@ -56,9 +51,10 @@
             
             {# 只在非内联模型时显示数据表格 #}
             {% if not frontend_config.is_inline %}
-                {# 传递过滤器配置 #}
-                {% set filters = frontend_config.filterFields %}
-                {% include "admin/components/data_table.html" %}
+                {# 传递过滤器配置并显示数据表格 #}
+                {% with filters = frontend_config.filterFields %}
+                    {% include "admin/components/data_table.html" %}
+                {% endwith %}
             {% endif %}
         </div>
     </div>
